@@ -5,13 +5,22 @@ require_once __DIR__ . '/config.php';
 
 class Database
 {
-    private string $host = '127.0.0.1';
-    private string $db_name = 'em-system';
-    private string $username = 'root';
-    private string $password = '';
-    private int $port = 3306;
+    private string $host;
+    private string $db_name;
+    private string $username;
+    private string $password;
+    private int $port;
 
     public ?PDO $conn = null;
+
+    public function __construct()
+    {
+        $this->host = getenv('DB_HOST') ?: '127.0.0.1';
+        $this->db_name = getenv('DB_DATABASE') ?: 'em-system';
+        $this->username = getenv('DB_USERNAME') ?: 'root';
+        $this->password = getenv('DB_PASSWORD') ?: '';
+        $this->port = (int) (getenv('DB_PORT') ?: 3306);
+    }
 
     public function connect(): PDO
     {
