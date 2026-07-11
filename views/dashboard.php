@@ -1,4 +1,19 @@
-<?php require_once __DIR__ . '/../controllers/DashboardController.php'; ?>
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../controllers/DashboardController.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+if (empty($_SESSION['user_id'])) {
+    header('Location: ../auth/login.php');
+    exit;
+}
+
+$currentPath = $_SERVER['PHP_SELF'] ?? '';
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -21,27 +36,27 @@
             <span class="brand-text">Expense<b>MS</b></span>
         </a>
 
-        <button class="collapse-toggle" id="collapseToggle" title="Collapse sidebar">
+        <button class="collapse-toggle" id="collapseToggle" title="Collapse sidebar" type="button">
             <i class="fa-solid fa-angles-left"></i>
         </button>
 
         <nav class="sidebar-nav">
-            <a href="dashboard.php" class="nav-item active" data-label="Dashboard">
+            <a href="dashboard.php" class="nav-item <?php echo strpos($currentPath, '/views/dashboard.php') !== false ? 'active' : ''; ?>" data-label="Dashboard">
                 <i class="fa-solid fa-grid-2"></i> <span>Dashboard</span>
             </a>
-            <a href="../expenses/index.php" class="nav-item" data-label="Expenses">
+            <a href="../expenses/index.php" class="nav-item <?php echo strpos($currentPath, '/expenses/') !== false ? 'active' : ''; ?>" data-label="Expenses">
                 <i class="fa-solid fa-receipt"></i> <span>Expenses</span>
             </a>
-            <a href="../categories/index.php" class="nav-item" data-label="Categories">
+            <a href="../categories/index.php" class="nav-item <?php echo strpos($currentPath, '/categories/') !== false ? 'active' : ''; ?>" data-label="Categories">
                 <i class="fa-solid fa-tags"></i> <span>Categories</span>
             </a>
-            <a href="../reports/index.php" class="nav-item" data-label="Reports">
+            <a href="../reports/index.php" class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>" data-label="Reports">
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
             </a>
-            <a href="../users/index.php" class="nav-item" data-label="Users">
+            <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
                 <i class="fa-solid fa-users"></i> <span>Users</span>
             </a>
-            <a href="../settings/index.php" class="nav-item" data-label="Settings">
+            <a href="../settings/index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
             </a>
         </nav>
@@ -61,15 +76,23 @@
             </button>
 
             <div>
-                <h1 class="page-title">Welcome back, <?php echo htmlspecialchars($_SESSION['fullname']); ?>!</h1>
+                <h1 class="page-title">
+                    Welcome back, <?php echo htmlspecialchars((string)($_SESSION['fullname'] ?? 'User')); ?>!
+                </h1>
                 <p class="page-sub">It's the best time to manage your finances.</p>
             </div>
 
             <div class="topbar-right d-flex align-items-center gap-3">
 
-                <form class="topbar-search" action="../expenses/index.php" method="GET">
+                <form class="topbar-search" action="../search/index.php" method="GET">
                     <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                    <input type="text" name="search_description" class="search-input" placeholder="Search expenses, categories...">
+                    <input
+                        type="text"
+                        name="q"
+                        class="search-input"
+                        placeholder="Search pages, expenses, categories, users..."
+                        autocomplete="off"
+                    >
                 </form>
 
                 <button class="icon-btn" id="themeToggle" title="Toggle dark/light mode" type="button">
@@ -95,10 +118,12 @@
                 </div>
 
                 <div class="user-chip">
-                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['fullname'], 0, 1)); ?></div>
+                    <div class="user-avatar">
+                        <?php echo strtoupper(substr((string)($_SESSION['fullname'] ?? 'U'), 0, 1)); ?>
+                    </div>
                     <div class="user-info-text">
-                        <div class="user-name"><?php echo htmlspecialchars($_SESSION['fullname']); ?></div>
-                        <div class="user-role"><?php echo htmlspecialchars($_SESSION['role']); ?></div>
+                        <div class="user-name"><?php echo htmlspecialchars((string)($_SESSION['fullname'] ?? 'User')); ?></div>
+                        <div class="user-role"><?php echo htmlspecialchars((string)($_SESSION['role'] ?? 'User')); ?></div>
                     </div>
                 </div>
 
@@ -110,7 +135,7 @@
                 <div class="stat-icon"><i class="fa-solid fa-calendar-day"></i></div>
                 <div class="stat-info">
                     <span class="stat-label">Total Expenses Today</span>
-                    <span class="stat-value">₱<?php echo number_format($totalToday, 2); ?></span>
+                    <span class="stat-value">₱<?php echo number_format((float)$totalToday, 2); ?></span>
                 </div>
             </div>
 
@@ -118,7 +143,7 @@
                 <div class="stat-icon"><i class="fa-solid fa-calendar-days"></i></div>
                 <div class="stat-info">
                     <span class="stat-label">Total Expenses This Month</span>
-                    <span class="stat-value">₱<?php echo number_format($totalThisMonth, 2); ?></span>
+                    <span class="stat-value">₱<?php echo number_format((float)$totalThisMonth, 2); ?></span>
                 </div>
             </div>
 
@@ -126,7 +151,7 @@
                 <div class="stat-icon"><i class="fa-solid fa-chart-pie"></i></div>
                 <div class="stat-info">
                     <span class="stat-label">Total Expenses Overall</span>
-                    <span class="stat-value">₱<?php echo number_format($totalOverall, 2); ?></span>
+                    <span class="stat-value">₱<?php echo number_format((float)$totalOverall, 2); ?></span>
                 </div>
             </div>
         </div>
@@ -135,6 +160,7 @@
             <div class="panel-header">
                 <h2>Recent Expenses</h2>
             </div>
+
             <table class="expense-table">
                 <thead>
                     <tr>
@@ -145,13 +171,15 @@
                 </thead>
                 <tbody>
                     <?php if (empty($recentExpenses)): ?>
-                        <tr><td colspan="3" class="text-center text-muted">No expenses recorded yet.</td></tr>
+                        <tr>
+                            <td colspan="3" class="text-center text-muted">No expenses recorded yet.</td>
+                        </tr>
                     <?php else: ?>
                         <?php foreach ($recentExpenses as $expense): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($expense['title']); ?></td>
-                                <td>₱<?php echo number_format($expense['amount'], 2); ?></td>
-                                <td><?php echo date('M d, Y', strtotime($expense['expense_date'])); ?></td>
+                                <td><?php echo htmlspecialchars((string)$expense['title']); ?></td>
+                                <td>₱<?php echo number_format((float)$expense['amount'], 2); ?></td>
+                                <td><?php echo date('M d, Y', strtotime((string)$expense['expense_date'])); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -190,36 +218,46 @@
     const savedTheme = localStorage.getItem('theme') || 'light';
     applyTheme(savedTheme);
 
-    themeToggle.addEventListener('click', () => {
-        const currentTheme = htmlEl.getAttribute('data-theme') || 'light';
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        applyTheme(newTheme);
-    });
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = htmlEl.getAttribute('data-theme') || 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        });
+    }
 
     const sidebarToggle = document.getElementById('sidebarToggle');
     const sidebar = document.querySelector('.sidebar');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
 
-    sidebarToggle.addEventListener('click', () => {
-        sidebar.classList.add('active');
-        sidebarOverlay.classList.add('active');
-    });
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', () => {
+            sidebar.classList.add('active');
+            sidebarOverlay.classList.add('active');
+        });
+    }
 
-    sidebarOverlay.addEventListener('click', () => {
-        sidebar.classList.remove('active');
-        sidebarOverlay.classList.remove('active');
-    });
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', () => {
+            sidebar.classList.remove('active');
+            sidebarOverlay.classList.remove('active');
+        });
+    }
 
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
 
     const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
-    if (savedCollapse) mainSidebar.classList.add('collapsed');
+    if (savedCollapse && mainSidebar) {
+        mainSidebar.classList.add('collapsed');
+    }
 
-    collapseToggle.addEventListener('click', () => {
-        mainSidebar.classList.toggle('collapsed');
-        localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
-    });
+    if (collapseToggle) {
+        collapseToggle.addEventListener('click', () => {
+            mainSidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
+        });
+    }
 
     const notifBtn = document.getElementById('notifBtn');
     const notifDropdown = document.getElementById('notifDropdown');
@@ -304,34 +342,40 @@
             });
     }
 
-    notifBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        notifDropdown.classList.toggle('show');
+    if (notifBtn) {
+        notifBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            notifDropdown.classList.toggle('show');
 
-        if (notifDropdown.classList.contains('show')) {
-            loadNotifications();
-        }
-    });
+            if (notifDropdown.classList.contains('show')) {
+                loadNotifications();
+            }
+        });
+    }
 
     document.addEventListener('click', (e) => {
-        if (!notifDropdown.contains(e.target) && !notifBtn.contains(e.target)) {
+        if (notifDropdown && notifBtn && !notifDropdown.contains(e.target) && !notifBtn.contains(e.target)) {
             notifDropdown.classList.remove('show');
         }
     });
 
-    notifList.addEventListener('click', (e) => {
-        const item = e.target.closest('.notif-item');
-        if (item) {
-            fetch('../notifications/mark_read.php?id=' + item.dataset.id)
-                .then(() => loadNotifications());
-        }
-    });
+    if (notifList) {
+        notifList.addEventListener('click', (e) => {
+            const item = e.target.closest('.notif-item');
+            if (item) {
+                fetch('../notifications/mark_read.php?id=' + item.dataset.id)
+                    .then(() => loadNotifications());
+            }
+        });
+    }
 
-    markAllRead.addEventListener('click', (e) => {
-        e.preventDefault();
-        fetch('../notifications/mark_read.php?all=1')
-            .then(() => loadNotifications());
-    });
+    if (markAllRead) {
+        markAllRead.addEventListener('click', (e) => {
+            e.preventDefault();
+            fetch('../notifications/mark_read.php?all=1')
+                .then(() => loadNotifications());
+        });
+    }
 
     loadNotifications();
     setInterval(loadNotifications, 5000);

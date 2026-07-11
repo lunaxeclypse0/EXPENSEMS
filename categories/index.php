@@ -1,6 +1,17 @@
 <?php
 declare(strict_types=1);
+
 require_once __DIR__ . '/../config/db_connect.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+if (empty($_SESSION['user_id'])) {
+    header('Location: ../auth/login.php');
+    exit;
+}
+
 $currentPath = $_SERVER['PHP_SELF'] ?? '';
 ?>
 <!DOCTYPE html>
@@ -353,8 +364,8 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                 </table>
             </div>
 
-            <a href="../expenses/index.php" class="back-link d-inline-block mt-3">
-                <i class="fa-solid fa-arrow-left me-1"></i> Back to Expenses
+            <a href="../views/dashboard.php" class="back-link d-inline-block mt-3">
+                <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
             </a>
         </div>
 
