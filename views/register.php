@@ -1,9 +1,7 @@
 <?php
-require_once __DIR__ . '/../config/config.php';
+declare(strict_types=1);
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../config/bootstrap.php';
 
 if (!empty($_SESSION['user_id'])) {
     header('Location: dashboard.php');
@@ -519,7 +517,7 @@ if (!empty($_SESSION['user_id'])) {
 
 <div class="theme-toggle-wrap">
     <button class="theme-toggle-btn" id="themeToggle" type="button" aria-label="Toggle theme">
-        <i class="fa-solid fa-gear"></i>
+        <i class="fa-solid fa-moon" id="themeIcon"></i>
     </button>
 </div>
 
@@ -542,7 +540,9 @@ if (!empty($_SESSION['user_id'])) {
                 <span class="step-dot" id="dot2"></span>
             </div>
 
-            <form id="registerForm" novalidate>
+            <form id="registerForm" method="POST" novalidate>
+                <?php echo csrfField(); ?>
+
                 <div class="step-panel active" id="step1">
                     <div class="mb-3 input-group-custom">
                         <label for="fullname" class="form-label">Full Name</label>
@@ -581,7 +581,7 @@ if (!empty($_SESSION['user_id'])) {
                         <label for="password" class="form-label">Password</label>
                         <div class="input-icon-wrap">
                             <i class="fa-solid fa-lock"></i>
-                            <input type="password" class="form-control" id="password" name="password" placeholder="At least 6 characters" autocomplete="new-password">
+                            <input type="password" class="form-control" id="password" name="password" placeholder="At least 12 characters" autocomplete="new-password">
                             <i class="fa-solid fa-eye toggle-password" id="togglePassword"></i>
                         </div>
                         <div class="invalid-feedback-custom" id="passwordError"></div>
@@ -629,16 +629,44 @@ if (!empty($_SESSION['user_id'])) {
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    window.CSRF_TOKEN = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
     const themeToggle = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
     const root = document.documentElement;
-    let currentTheme = localStorage.getItem('theme') || 'dark';
-    root.setAttribute('data-theme', currentTheme);
+
+    function applyTheme(theme) {
+        root.setAttribute('data-theme', theme);
+        safeSetStorage('theme', theme);
+        if (themeIcon) {
+            themeIcon.className = theme === 'dark'
+                ? 'fa-solid fa-sun'
+                : 'fa-solid fa-moon';
+        }
+    }
+
+    let currentTheme = safeGetStorage('theme', 'dark');
+    applyTheme(currentTheme);
 
     if (themeToggle) {
         themeToggle.addEventListener('click', () => {
             currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            root.setAttribute('data-theme', currentTheme);
-            localStorage.setItem('theme', currentTheme);
+            applyTheme(currentTheme);
         });
     }
 
@@ -667,7 +695,7 @@ if (!empty($_SESSION['user_id'])) {
     const registerSpinner = document.getElementById('registerSpinner');
     const toastElement = document.getElementById('registerToast');
     const toastBody = document.getElementById('toastBody');
-    const registerToast = new bootstrap.Toast(toastElement, { delay: 3000 });
+    const registerToast = toastElement ? new bootstrap.Toast(toastElement, { delay: 3000 }) : null;
 
     const fullname = document.getElementById('fullname');
     const username = document.getElementById('username');
@@ -682,12 +710,14 @@ if (!empty($_SESSION['user_id'])) {
     const confirmPasswordError = document.getElementById('confirmPasswordError');
 
     function showToast(message, isSuccess = true) {
+        if (!toastElement || !toastBody || !registerToast) return;
         toastBody.textContent = message;
         toastElement.style.background = isSuccess ? '#166534' : '#991b1b';
         registerToast.show();
     }
 
     function setLoadingState(isLoading) {
+        if (!registerBtn || !registerSpinner) return;
         if (isLoading) {
             registerBtn.disabled = true;
             registerSpinner.classList.remove('d-none');
@@ -746,8 +776,8 @@ if (!empty($_SESSION['user_id'])) {
         if (password.value === '') {
             passwordError.textContent = 'Password is required.';
             isValid = false;
-        } else if (password.value.length < 6) {
-            passwordError.textContent = 'Password must be at least 6 characters.';
+        } else if (password.value.length < 12) {
+            passwordError.textContent = 'Password must be at least 12 characters.';
             isValid = false;
         }
 
@@ -776,81 +806,106 @@ if (!empty($_SESSION['user_id'])) {
         }
     }
 
-    nextStepBtn.addEventListener('click', () => {
-        if (validateStep1()) {
-            goToStep(2);
-        } else {
-            showToast('Please complete Step 1 correctly.', false);
-        }
-    });
-
-    prevStepBtn.addEventListener('click', () => {
-        goToStep(1);
-    });
-
-    registerForm.addEventListener('submit', async function (e) {
-        e.preventDefault();
-
-        clearErrors();
-
-        const step1Valid = validateStep1();
-        const step2Valid = validateStep2();
-
-        if (!step1Valid) {
-            goToStep(1);
-            showToast('Please fix the highlighted errors.', false);
-            return;
-        }
-
-        if (!step2Valid) {
-            goToStep(2);
-            showToast('Please fix the highlighted errors.', false);
-            return;
-        }
-
-        setLoadingState(true);
-
-        try {
-            const formData = new FormData(registerForm);
-
-            const response = await fetch('../auth/register_process.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                showToast(result.message || 'Registration successful!', true);
-                registerForm.reset();
-                goToStep(1);
-
-                setTimeout(() => {
-                    window.location.href = 'login.php';
-                }, 1200);
+    if (nextStepBtn) {
+        nextStepBtn.addEventListener('click', () => {
+            if (validateStep1()) {
+                goToStep(2);
             } else {
-                if (result.errors) {
-                    fullnameError.textContent = result.errors.fullname || '';
-                    usernameError.textContent = result.errors.username || '';
-                    emailError.textContent = result.errors.email || '';
-                    passwordError.textContent = result.errors.password || '';
-                    confirmPasswordError.textContent = result.errors.confirm_password || '';
-                }
-
-                if (result.errors && (result.errors.fullname || result.errors.username || result.errors.email)) {
-                    goToStep(1);
-                } else {
-                    goToStep(2);
-                }
-
-                showToast(result.message || 'Registration failed.', false);
+                showToast('Please complete Step 1 correctly.', false);
             }
-        } catch (error) {
-            showToast('Something went wrong. Please try again.', false);
-        } finally {
-            setLoadingState(false);
-        }
-    });
+        });
+    }
+
+    if (prevStepBtn) {
+        prevStepBtn.addEventListener('click', () => {
+            goToStep(1);
+        });
+    }
+
+    if (registerForm) {
+        registerForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            clearErrors();
+
+            const step1Valid = validateStep1();
+            const step2Valid = validateStep2();
+
+            if (!step1Valid) {
+                goToStep(1);
+                showToast('Please fix the highlighted errors.', false);
+                return;
+            }
+
+            if (!step2Valid) {
+                goToStep(2);
+                showToast('Please fix the highlighted errors.', false);
+                return;
+            }
+
+            setLoadingState(true);
+
+            try {
+                const formData = new FormData(registerForm);
+
+                if (!formData.has('_token') && window.CSRF_TOKEN) {
+                    formData.append('_token', window.CSRF_TOKEN);
+                }
+
+                const response = await fetch('../controllers/RegisterController.php', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+
+                const contentType = response.headers.get('content-type') || '';
+                let result = null;
+
+                if (contentType.includes('application/json')) {
+                    result = await response.json();
+                } else {
+                    const text = await response.text();
+                    throw new Error(text || 'Invalid server response.');
+                }
+
+                if (!response.ok) {
+                    throw new Error(result.message || 'Registration failed.');
+                }
+
+                if (result.success) {
+                    showToast(result.message || 'Registration successful!', true);
+                    registerForm.reset();
+                    goToStep(1);
+
+                    setTimeout(() => {
+                        window.location.href = 'login.php?registered=1';
+                    }, 1200);
+                } else {
+                    if (result.errors) {
+                        fullnameError.textContent = result.errors.fullname || '';
+                        usernameError.textContent = result.errors.username || '';
+                        emailError.textContent = result.errors.email || '';
+                        passwordError.textContent = result.errors.password || '';
+                        confirmPasswordError.textContent = result.errors.confirm_password || '';
+                    }
+
+                    if (result.errors && (result.errors.fullname || result.errors.username || result.errors.email)) {
+                        goToStep(1);
+                    } else {
+                        goToStep(2);
+                    }
+
+                    showToast(result.message || 'Registration failed.', false);
+                }
+            } catch (error) {
+                showToast(error.message || 'Something went wrong. Please try again.', false);
+            } finally {
+                setLoadingState(false);
+            }
+        });
+    }
 </script>
 </body>
 </html>

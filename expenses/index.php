@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../config/db_connect.php';
+require_once __DIR__ . '/../config/bootstrap.php';
+requireLogin();
 $currentPath = $_SERVER['PHP_SELF'] ?? '';
 ?>
 <!DOCTYPE html>
@@ -151,33 +153,47 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
         </button>
 
         <nav class="sidebar-nav">
-            <a href="../views/dashboard.php" class="nav-item <?php echo strpos($currentPath, '/views/dashboard.php') !== false ? 'active' : ''; ?>" data-label="Dashboard">
+            <a href="../views/dashboard.php"
+            class="nav-item <?php echo strpos($currentPath, '/views/dashboard.php') !== false ? 'active' : ''; ?>"
+            data-label="Dashboard">
                 <i class="fa-solid fa-grid-2"></i> <span>Dashboard</span>
             </a>
 
-            <a href="../expenses/index.php" class="nav-item <?php echo strpos($currentPath, '/expenses/') !== false ? 'active' : ''; ?>" data-label="Expenses">
+            <a href="../expenses/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/expenses/') !== false ? 'active' : ''; ?>"
+            data-label="Expenses">
                 <i class="fa-solid fa-receipt"></i> <span>Expenses</span>
             </a>
 
-            <a href="../categories/index.php" class="nav-item <?php echo strpos($currentPath, '/categories/') !== false ? 'active' : ''; ?>" data-label="Categories">
+            <a href="../categories/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/categories/') !== false ? 'active' : ''; ?>"
+            data-label="Categories">
                 <i class="fa-solid fa-tags"></i> <span>Categories</span>
             </a>
 
-            <a href="../reports/index.php" class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>" data-label="Reports">
+            <a href="../reports/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>"
+            data-label="Reports">
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
             </a>
 
-            <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
-                <i class="fa-solid fa-users"></i> <span>Users</span>
-            </a>
+            <?php if (isAdmin()): ?>
+                <a href="../users/index.php"
+                class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>"
+                data-label="Users">
+                    <i class="fa-solid fa-users"></i> <span>Users</span>
+                </a>
+            <?php endif; ?>
 
-            <a href="../settings/index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
+            <a href="../settings/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>"
+            data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
             </a>
         </nav>
 
         <div class="sidebar-footer">
-            <a href="../auth/logout.php" id="logoutBtn" class="nav-item logout" data-label="Log out">
+            <a href="../auth/logout.php" class="nav-item logout" data-label="Log out">
                 <i class="fa-solid fa-right-from-bracket"></i> <span>Log out</span>
             </a>
         </div>
@@ -261,7 +277,7 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                         $params = $_GET;
                         $params['sort_by'] = $column;
                         $params['sort_order'] = ($sort_by == $column) ? $next_order : 'ASC';
-                        $query = htmlspecialchars_decode(http_build_query($params));
+                        $query = e(http_build_query($params));
                         $icon = '';
                         if ($sort_by == $column) {
                             $icon = ($sort_order == 'ASC') ? '<i class="fa-solid fa-arrow-up"></i>' : '<i class="fa-solid fa-arrow-down"></i>';
@@ -284,6 +300,11 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                         <?php
                         $conditions = [];
                         $params = [];
+
+                        if (!isAdmin()) {
+                            $conditions[] = 'user_id = :user_id';
+                            $params['user_id'] = currentUserId();
+                        }
 
                         if (!empty($_GET['search_date'])) {
                             $conditions[] = "expense_date = :search_date";
@@ -322,6 +343,7 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                                 $paymentMethod = htmlspecialchars($row['payment_method']);
                                 $remarks = !empty($row['remarks']) ? htmlspecialchars($row['remarks']) : '—';
 
+                                $deleteToken = e(csrfToken());
                                 echo "<tr>
                                     <td>{$expenseDate}</td>
                                     <td><span class='badge-category'>{$category}</span></td>
@@ -331,7 +353,11 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                                     <td class='text-muted'>{$remarks}</td>
                                     <td class='text-end'>
                                         <a href='edit_expense.php?id={$id}' class='action-icon'><i class='fa-solid fa-pen'></i></a>
-                                        <a href='delete_expense.php?id={$id}' class='action-icon delete' onclick='return confirm(\"Delete this expense?\")'><i class='fa-solid fa-trash'></i></a>
+                                        <form method='post' action='delete_expense.php' class='d-inline' onsubmit='return confirm(\"Delete this expense?\")'>
+                                            <input type='hidden' name='id' value='{$id}'>
+                                            <input type='hidden' name='csrf_token' value='{$deleteToken}'>
+                                            <button type='submit' class='action-icon delete border-0 bg-transparent p-0' title='Delete expense'><i class='fa-solid fa-trash'></i></button>
+                                        </form>
                                     </td>
                                 </tr>";
                             }
@@ -355,6 +381,21 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
 
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
     if (sidebarToggle) {
         sidebarToggle.addEventListener('click', () => {
             sidebar.classList.add('active');
@@ -369,7 +410,7 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
         });
     }
 
-    const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
     if (savedCollapse && mainSidebar) {
         mainSidebar.classList.add('collapsed');
     }
@@ -377,11 +418,11 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
     if (collapseToggle) {
         collapseToggle.addEventListener('click', () => {
             mainSidebar.classList.toggle('collapsed');
-            localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
         });
     }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedTheme = safeGetStorage('theme', 'light');
     document.documentElement.setAttribute('data-theme', savedTheme);
 </script>
 </body>

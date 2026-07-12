@@ -1,139 +1,239 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db_connect.php';
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+requireLogin();
 
-if (empty($_SESSION['user_id'])) {
-    header('Location: ../auth/login.php');
-    exit;
-}
+$userId = currentUserId();
 
-$userId = (int) $_SESSION['user_id'];
-
-$stmt = $conn->prepare("SELECT * FROM users WHERE id = :id");
-$stmt->execute(['id' => $userId]);
-$user = $stmt->fetch();
+$loadUser = $conn->prepare('
+    SELECT id, fullname, username, email, password, profile_picture, role
+    FROM users
+    WHERE id = :id
+    LIMIT 1
+');
+$loadUser->execute(['id' => $userId]);
+$user = $loadUser->fetch(PDO::FETCH_ASSOC);
 
 if (!$user) {
-    session_destroy();
-    header('Location: ../auth/login.php');
-    exit;
+    destroyCurrentSession();
+    redirectTo(BASE_URL . 'views/login.php');
 }
 
 $success = '';
 $error = '';
+$profileDirectory = __DIR__ . '/../assets/uploads/profiles';
+
+function profileFilePath(string $directory, ?string $filename): ?string
+{
+    if (
+        !$filename ||
+        basename($filename) !== $filename ||
+        !preg_match('/^user_\d+_[a-f0-9]{32}\.(jpg|jpeg|png|gif)$/i', $filename)
+    ) {
+        return null;
+    }
+
+    return $directory . DIRECTORY_SEPARATOR . $filename;
+}
+
+function profileImageUrl(?string $filename): ?string
+{
+    if (
+        !$filename ||
+        basename($filename) !== $filename ||
+        !preg_match('/^user_\d+_[a-f0-9]{32}\.(jpg|jpeg|png|gif)$/i', $filename)
+    ) {
+        return null;
+    }
+
+    $basePath = __DIR__ . '/../assets/uploads/profiles/' . $filename;
+    if (!is_file($basePath)) {
+        return null;
+    }
+
+    $url = '../assets/uploads/profiles/' . rawurlencode($filename) . '?v=' . filemtime($basePath);
+    return $url;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrfOrAbort();
 
     if (isset($_POST['remove_picture'])) {
-        if (!empty($user['profile_picture']) && file_exists('../assets/uploads/profiles/' . $user['profile_picture'])) {
-            unlink('../assets/uploads/profiles/' . $user['profile_picture']);
+        $path = profileFilePath($profileDirectory, $user['profile_picture'] ?? null);
+
+        $conn->prepare('UPDATE users SET profile_picture = NULL WHERE id = :id')
+            ->execute(['id' => $userId]);
+
+        if ($path && is_file($path)) {
+            @unlink($path);
         }
 
-        $stmt = $conn->prepare("UPDATE users SET profile_picture = NULL WHERE id = :id");
-        $stmt->execute(['id' => $userId]);
+        $_SESSION['profile_picture'] = null;
 
-        header("Location: index.php?removed=1");
-        exit;
+        redirectTo('index.php?picture_removed=1');
     }
 
-    $fullname = trim($_POST['fullname'] ?? '');
-    $username = trim($_POST['username'] ?? '');
-    $email = trim($_POST['email'] ?? '');
+    $fullname = trim((string) ($_POST['fullname'] ?? ''));
+    $username = trim((string) ($_POST['username'] ?? ''));
+    $email = strtolower(trim((string) ($_POST['email'] ?? '')));
+    $currentPassword = (string) ($_POST['current_password'] ?? '');
+    $newPassword = (string) ($_POST['new_password'] ?? '');
+    $confirmPassword = (string) ($_POST['confirm_password'] ?? '');
+    $newFileName = null;
 
-    if ($fullname === '' || $username === '' || $email === '') {
-        $error = 'Full name, username, and email are required.';
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $error = 'Please enter a valid email address.';
+    if (
+        $fullname === '' ||
+        mb_strlen($fullname) > 100 ||
+        !preg_match('/^[A-Za-z0-9_.-]{3,50}$/', $username) ||
+        !filter_var($email, FILTER_VALIDATE_EMAIL)
+    ) {
+        $error = 'Please provide a valid full name, username, and email address.';
+    } elseif ($newPassword !== '' && (strlen($newPassword) < 12 || !hash_equals($newPassword, $confirmPassword))) {
+        $error = 'New passwords must match and be at least 12 characters.';
+    } elseif ($newPassword !== '' && !password_verify($currentPassword, (string) ($user['password'] ?? ''))) {
+        $error = 'Your current password is incorrect.';
     } else {
-        $check = $conn->prepare("SELECT id FROM users WHERE (email = :email OR username = :username) AND id != :id");
-        $check->execute([
-            'email' => $email,
+        $duplicate = $conn->prepare('
+            SELECT id
+            FROM users
+            WHERE (username = :username OR email = :email) AND id != :id
+            LIMIT 1
+        ');
+        $duplicate->execute([
             'username' => $username,
-            'id' => $userId
+            'email' => $email,
+            'id' => $userId,
         ]);
 
-        if ($check->fetch()) {
-            $error = 'Email or username already used by another account.';
+        if ($duplicate->fetch(PDO::FETCH_ASSOC)) {
+            $error = 'That username or email address belongs to another account.';
+        }
+    }
+
+    if (
+        $error === '' &&
+        isset($_FILES['profile_image']) &&
+        is_array($_FILES['profile_image']) &&
+        ($_FILES['profile_image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE
+    ) {
+        $upload = $_FILES['profile_image'];
+        $allowedTypes = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+        ];
+
+        $tmpName = (string) ($upload['tmp_name'] ?? '');
+        $uploadError = (int) ($upload['error'] ?? UPLOAD_ERR_OK);
+        $uploadSize = (int) ($upload['size'] ?? 0);
+
+        $mime = is_uploaded_file($tmpName)
+            ? (new finfo(FILEINFO_MIME_TYPE))->file($tmpName)
+            : false;
+
+        if (
+            $uploadError !== UPLOAD_ERR_OK ||
+            $uploadSize <= 0 ||
+            $uploadSize > 5 * 1024 * 1024 ||
+            !$mime ||
+            !isset($allowedTypes[$mime]) ||
+            !@getimagesize($tmpName)
+        ) {
+            $error = 'Upload a valid JPEG, PNG, or GIF image smaller than 5 MB.';
         } else {
-            if (!empty($_FILES['profile_image']['name'])) {
-                $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-                $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
+            if (!is_dir($profileDirectory) && !mkdir($profileDirectory, 0755, true) && !is_dir($profileDirectory)) {
+                $error = 'Profile image storage is not available.';
+            } elseif (!is_writable($profileDirectory)) {
+                $error = 'Profile image folder is not writable.';
+            } else {
+                $newFileName = 'user_' . $userId . '_' . bin2hex(random_bytes(16)) . '.' . $allowedTypes[$mime];
+                $destination = $profileDirectory . DIRECTORY_SEPARATOR . $newFileName;
 
-                if (in_array($ext, $allowed, true) && (int)$_FILES['profile_image']['size'] <= 10 * 1024 * 1024) {
-                    $newFileName = 'user_' . $userId . '_' . time() . '.' . $ext;
-                    $uploadPath = '../assets/uploads/profiles/' . $newFileName;
-
-                    if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $uploadPath)) {
-                        if (!empty($user['profile_picture']) && file_exists('../assets/uploads/profiles/' . $user['profile_picture'])) {
-                            unlink('../assets/uploads/profiles/' . $user['profile_picture']);
-                        }
-
-                        $stmt = $conn->prepare("UPDATE users SET profile_picture = :pic WHERE id = :id");
-                        $stmt->execute([
-                            'pic' => $newFileName,
-                            'id' => $userId
-                        ]);
-                    } else {
-                        $error = 'Failed to upload image. Check folder permissions.';
-                    }
-                } else {
-                    $error = 'Invalid file. Only JPG, PNG, GIF under 10MB allowed.';
-                }
-            }
-
-            if ($error === '') {
-                $stmt = $conn->prepare("UPDATE users SET fullname = :fullname, username = :username, email = :email WHERE id = :id");
-                $stmt->execute([
-                    'fullname' => $fullname,
-                    'username' => $username,
-                    'email' => $email,
-                    'id' => $userId
-                ]);
-
-                $_SESSION['fullname'] = $fullname;
-
-                $currentPassword = $_POST['current_password'] ?? '';
-                $newPassword = $_POST['new_password'] ?? '';
-                $confirmPassword = $_POST['confirm_password'] ?? '';
-
-                if ($newPassword !== '') {
-                    if (!password_verify($currentPassword, (string)$user['password'])) {
-                        $error = 'Current password is incorrect.';
-                    } elseif ($newPassword !== $confirmPassword) {
-                        $error = 'New passwords do not match.';
-                    } else {
-                        $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
-
-                        $stmt = $conn->prepare("UPDATE users SET password = :password WHERE id = :id");
-                        $stmt->execute([
-                            'password' => $hashed,
-                            'id' => $userId
-                        ]);
-
-                        $success = 'Profile and password updated successfully.';
-                    }
-                } else {
-                    $success = 'Profile updated successfully.';
+                if (!move_uploaded_file($tmpName, $destination)) {
+                    $error = 'Unable to save the profile image.';
                 }
             }
         }
     }
 
-    $stmt = $conn->prepare("SELECT * FROM users WHERE id = :id");
-    $stmt->execute(['id' => $userId]);
-    $user = $stmt->fetch();
+    if ($error === '') {
+        $oldPicturePath = profileFilePath($profileDirectory, $user['profile_picture'] ?? null);
+
+        $conn->beginTransaction();
+
+        try {
+            $sql = 'UPDATE users SET fullname = :fullname, username = :username, email = :email';
+            $params = [
+                'fullname' => $fullname,
+                'username' => $username,
+                'email' => $email,
+                'id' => $userId,
+            ];
+
+            if ($newFileName !== null) {
+                $sql .= ', profile_picture = :profile_picture';
+                $params['profile_picture'] = $newFileName;
+            }
+
+            if ($newPassword !== '') {
+                $sql .= ', password = :password';
+                $params['password'] = password_hash($newPassword, PASSWORD_DEFAULT);
+            }
+
+            $conn->prepare($sql . ' WHERE id = :id')->execute($params);
+            $conn->commit();
+
+            if ($newFileName !== null && $oldPicturePath && is_file($oldPicturePath)) {
+                @unlink($oldPicturePath);
+            }
+
+            $success = $newPassword !== ''
+                ? 'Profile and password updated successfully.'
+                : 'Profile updated successfully.';
+
+            $loadUser->execute(['id' => $userId]);
+            $user = $loadUser->fetch(PDO::FETCH_ASSOC);
+
+            $_SESSION['fullname'] = (string) ($user['fullname'] ?? '');
+            $_SESSION['username'] = (string) ($user['username'] ?? '');
+            $_SESSION['email'] = (string) ($user['email'] ?? '');
+            $_SESSION['role'] = (string) ($user['role'] ?? '');
+            $_SESSION['profile_picture'] = $user['profile_picture'] ?? null;
+        } catch (Throwable $exception) {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
+
+            if ($newFileName !== null) {
+                $newPath = profileFilePath($profileDirectory, $newFileName);
+                if ($newPath && is_file($newPath)) {
+                    @unlink($newPath);
+                }
+            }
+
+            error_log('Settings update error: ' . $exception->getMessage());
+            $error = 'Unable to update your profile.';
+        }
+    }
 }
 
-if (isset($_GET['removed'])) {
+if (isset($_GET['picture_removed'])) {
     $success = 'Profile picture removed.';
+    $loadUser->execute(['id' => $userId]);
+    $user = $loadUser->fetch(PDO::FETCH_ASSOC);
+
+    $_SESSION['fullname'] = (string) ($user['fullname'] ?? '');
+    $_SESSION['username'] = (string) ($user['username'] ?? '');
+    $_SESSION['email'] = (string) ($user['email'] ?? '');
+    $_SESSION['role'] = (string) ($user['role'] ?? '');
+    $_SESSION['profile_picture'] = $user['profile_picture'] ?? null;
 }
 
-$currentPath = $_SERVER['PHP_SELF'] ?? '';
+$currentPath = $_SERVER['SCRIPT_NAME'] ?? ($_SERVER['PHP_SELF'] ?? '');
+$avatarUrl = !empty($user['profile_picture']) ? profileImageUrl((string) $user['profile_picture']) : null;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -146,6 +246,31 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../assets/css/dashboard.css">
     <link rel="stylesheet" href="../assets/css/settings.css">
+    <style>
+        .avatar-circle {
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e9eefc;
+            color: #334155;
+            font-size: 34px;
+            font-weight: 700;
+            border: 3px solid rgba(255,255,255,0.65);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+            flex-shrink: 0;
+        }
+
+        .avatar-circle img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+    </style>
 </head>
 <body>
 <div class="app-wrapper">
@@ -171,9 +296,6 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
             </a>
             <a href="../reports/index.php" class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>" data-label="Reports">
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
-            </a>
-            <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
-                <i class="fa-solid fa-users"></i> <span>Users</span>
             </a>
             <a href="index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
@@ -202,17 +324,19 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
 
             <?php if ($success): ?>
                 <div class="settings-alert success">
-                    <i class="fa-solid fa-circle-check"></i> <?php echo htmlspecialchars($success); ?>
+                    <i class="fa-solid fa-circle-check"></i> <?php echo e($success); ?>
                 </div>
             <?php endif; ?>
 
             <?php if ($error): ?>
                 <div class="settings-alert error">
-                    <i class="fa-solid fa-circle-exclamation"></i> <?php echo htmlspecialchars($error); ?>
+                    <i class="fa-solid fa-circle-exclamation"></i> <?php echo e($error); ?>
                 </div>
             <?php endif; ?>
 
             <form method="POST" enctype="multipart/form-data">
+                <?php echo csrfField(); ?>
+
                 <div class="settings-panel">
 
                     <div class="settings-section">
@@ -220,39 +344,43 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                         <div class="settings-section-desc">This is how others will recognize you across the system.</div>
 
                         <div class="avatar-block">
-                            <div class="avatar-circle">
-                                <?php if (!empty($user['profile_picture'])): ?>
-                                    <img src="../assets/uploads/profiles/<?php echo htmlspecialchars((string)$user['profile_picture']); ?>" alt="Profile">
+                            <div class="avatar-circle" id="avatarPreview">
+                                <?php if ($avatarUrl !== null): ?>
+                                    <img src="<?php echo e($avatarUrl); ?>" alt="Profile">
                                 <?php else: ?>
-                                    <?php echo strtoupper(substr((string)$user['fullname'], 0, 1)); ?>
+                                    <?php echo e(strtoupper(substr((string) ($user['fullname'] ?? 'U'), 0, 1))); ?>
                                 <?php endif; ?>
                             </div>
+
                             <div class="avatar-actions">
                                 <div class="avatar-actions-buttons">
-                                    <label for="profileImageInput" class="btn-upload"><i class="fa-solid fa-cloud-arrow-up me-1"></i> Upload Image</label>
-                                    <input type="file" name="profile_image" id="profileImageInput" accept=".jpg,.jpeg,.png,.gif" style="display:none;" onchange="this.form.submit()">
+                                    <label for="profileImageInput" class="btn-upload">
+                                        <i class="fa-solid fa-cloud-arrow-up me-1"></i> Choose Image
+                                    </label>
+                                    <input type="file" name="profile_image" id="profileImageInput" accept=".jpg,.jpeg,.png,.gif" style="display:none;">
+
                                     <?php if (!empty($user['profile_picture'])): ?>
                                         <button type="submit" name="remove_picture" value="1" class="btn-remove">Remove</button>
                                     <?php endif; ?>
                                 </div>
-                                <div class="avatar-hint">We support PNGs, JPEGs and GIFs under 10MB</div>
+                                <div class="avatar-hint" id="selectedFileText">We support PNGs, JPEGs and GIFs under 5MB</div>
                             </div>
                         </div>
 
                         <div class="settings-form-row">
                             <div class="settings-field">
                                 <label>Full Name</label>
-                                <input type="text" name="fullname" value="<?php echo htmlspecialchars((string)$user['fullname']); ?>" required>
+                                <input type="text" name="fullname" value="<?php echo e((string) ($user['fullname'] ?? '')); ?>" required>
                             </div>
                             <div class="settings-field">
                                 <label>Username</label>
-                                <input type="text" name="username" value="<?php echo htmlspecialchars((string)$user['username']); ?>" required>
+                                <input type="text" name="username" value="<?php echo e((string) ($user['username'] ?? '')); ?>" required>
                             </div>
                         </div>
 
                         <div class="settings-field">
                             <label>Email Address</label>
-                            <input type="email" name="email" value="<?php echo htmlspecialchars((string)$user['email']); ?>" required>
+                            <input type="email" name="email" value="<?php echo e((string) ($user['email'] ?? '')); ?>" required>
                             <div class="field-note">Used to log in to your account.</div>
                         </div>
                     </div>
@@ -300,39 +428,54 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
     const sidebarToggle = document.getElementById('sidebarToggle');
     const sidebar = document.querySelector('.sidebar');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
 
-    if (sidebarToggle) {
+    if (sidebarToggle && sidebar && sidebarOverlay) {
         sidebarToggle.addEventListener('click', () => {
             sidebar.classList.add('active');
             sidebarOverlay.classList.add('active');
         });
     }
 
-    if (sidebarOverlay) {
+    if (sidebarOverlay && sidebar) {
         sidebarOverlay.addEventListener('click', () => {
             sidebar.classList.remove('active');
             sidebarOverlay.classList.remove('active');
         });
     }
 
-    const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
-    if (savedCollapse) {
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
+    if (savedCollapse && mainSidebar) {
         mainSidebar.classList.add('collapsed');
     }
 
-    if (collapseToggle) {
+    if (collapseToggle && mainSidebar) {
         collapseToggle.addEventListener('click', () => {
             mainSidebar.classList.toggle('collapsed');
-            localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
         });
     }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedTheme = safeGetStorage('theme', 'light');
     document.documentElement.setAttribute('data-theme', savedTheme);
 
     const togglePassword = document.getElementById('togglePassword');
@@ -342,6 +485,28 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
         togglePassword.addEventListener('click', () => {
             passwordFields.classList.toggle('show');
             togglePassword.textContent = passwordFields.classList.contains('show') ? 'Hide' : 'Change Password';
+        });
+    }
+
+    const profileImageInput = document.getElementById('profileImageInput');
+    const selectedFileText = document.getElementById('selectedFileText');
+    const avatarPreview = document.getElementById('avatarPreview');
+
+    if (profileImageInput && selectedFileText) {
+        profileImageInput.addEventListener('change', () => {
+            const file = profileImageInput.files && profileImageInput.files[0];
+
+            selectedFileText.textContent = file
+                ? `Selected: ${file.name}`
+                : 'We support PNGs, JPEGs and GIFs under 5MB';
+
+            if (file && avatarPreview) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    avatarPreview.innerHTML = `<img src="${e.target.result}" alt="Profile preview">`;
+                };
+                reader.readAsDataURL(file);
+            }
         });
     }
 </script>

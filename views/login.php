@@ -1,17 +1,15 @@
 <?php
-require_once __DIR__ . '/../config/config.php';
+declare(strict_types=1);
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../config/bootstrap.php';
 
 if (!empty($_SESSION['user_id'])) {
     header('Location: dashboard.php');
     exit();
 }
 
-$timeout = isset($_GET['timeout']) ? true : false;
-$registered = isset($_GET['registered']) ? true : false;
+$timeout = isset($_GET['timeout']);
+$registered = isset($_GET['registered']);
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -58,12 +56,9 @@ $registered = isset($_GET['registered']) ? true : false;
             --glass-blur: blur(20px);
         }
 
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
-        html,
-        body {
+        html, body {
             height: 100%;
             min-height: 100%;
             margin: 0;
@@ -206,9 +201,7 @@ $registered = isset($_GET['registered']) ? true : false;
             line-height: 1.15;
         }
 
-        .brand-title span {
-            color: var(--accent);
-        }
+        .brand-title span { color: var(--accent); }
 
         .brand-subtitle {
             margin: 5px 0 0;
@@ -327,9 +320,7 @@ $registered = isset($_GET['registered']) ? true : false;
             transition: color 0.2s ease;
         }
 
-        .toggle-password:hover {
-            color: var(--accent);
-        }
+        .toggle-password:hover { color: var(--accent); }
 
         .invalid-feedback-custom {
             color: #f87171;
@@ -376,9 +367,7 @@ $registered = isset($_GET['registered']) ? true : false;
             font-size: 11.5px;
         }
 
-        .forgot-link:hover {
-            color: var(--accent);
-        }
+        .forgot-link:hover { color: var(--accent); }
 
         .btn-login {
             height: 50px;
@@ -398,9 +387,7 @@ $registered = isset($_GET['registered']) ? true : false;
             filter: brightness(1.02);
         }
 
-        .btn-login:active {
-            transform: translateY(0);
-        }
+        .btn-login:active { transform: translateY(0); }
 
         [data-theme="light"] .btn-login {
             background: linear-gradient(180deg, var(--accent), var(--accent-hover));
@@ -428,13 +415,8 @@ $registered = isset($_GET['registered']) ? true : false;
             background: var(--input-border);
         }
 
-        .divider-or::before {
-            left: 0;
-        }
-
-        .divider-or::after {
-            right: 0;
-        }
+        .divider-or::before { left: 0; }
+        .divider-or::after { right: 0; }
 
         .g_id_signin {
             position: relative;
@@ -475,36 +457,9 @@ $registered = isset($_GET['registered']) ? true : false;
             color: #fff;
         }
 
-        /* login actions row */
         .d-flex.justify-content-between.align-items-center.mb-4.mt-3 {
             margin-top: 9px !important;
             margin-bottom: 14px !important;
-        }
-
-        /* register: same design, slightly tighter vertical spacing only */
-        .register-card .input-group-custom {
-            margin-bottom: 10px !important;
-        }
-
-        .register-card .welcome-sub {
-            margin-bottom: 12px;
-        }
-
-        .register-card .invalid-feedback-custom {
-            min-height: 12px;
-            margin-top: 4px;
-        }
-
-        .register-card .btn-login {
-            margin-top: 2px !important;
-        }
-
-        .register-card .text-center.mt-3.mb-0.small {
-            margin-top: 10px !important;
-        }
-
-        .register-card .footer-note {
-            margin-top: 10px;
         }
 
         @media (max-width: 575px) {
@@ -526,23 +481,13 @@ $registered = isset($_GET['registered']) ? true : false;
                 border-radius: 12px;
             }
 
-            .login-shell {
-                padding: 16px 10px;
-            }
-
-            .login-wrapper {
-                max-width: 360px;
-            }
-
+            .login-shell { padding: 16px 10px; }
+            .login-wrapper { max-width: 360px; }
             .login-card {
                 border-radius: 26px;
                 padding: 22px 18px 18px;
             }
-
-            .brand-section {
-                margin-bottom: 14px;
-            }
-
+            .brand-section { margin-bottom: 14px; }
             .brand-logo {
                 width: 50px;
                 height: 50px;
@@ -550,37 +495,26 @@ $registered = isset($_GET['registered']) ? true : false;
                 font-size: 17px;
                 border-radius: 15px;
             }
-
-            .brand-title {
-                font-size: 21px;
-            }
-
-            .brand-subtitle {
-                font-size: 11px;
-            }
-
+            .brand-title { font-size: 21px; }
+            .brand-subtitle { font-size: 11px; }
             .welcome-text {
                 font-size: 17px;
                 margin: 8px 0 4px;
             }
-
             .welcome-sub {
                 font-size: 11px;
                 margin-bottom: 14px;
             }
-
             .form-label {
                 font-size: 11px;
                 margin-bottom: 6px;
             }
-
             .form-control {
                 height: 48px;
                 font-size: 16px;
                 border-radius: 15px;
                 padding: 12px 40px 12px 40px;
             }
-
             .toggle-password,
             .input-icon-wrap > i.fa-user,
             .input-icon-wrap > i.fa-lock,
@@ -588,79 +522,53 @@ $registered = isset($_GET['registered']) ? true : false;
             .input-icon-wrap > i.fa-id-card {
                 font-size: 12px;
             }
-
             .form-check-label,
             .forgot-link {
                 font-size: 11px;
             }
-
             .btn-login {
                 height: 48px;
                 font-size: 13.5px;
             }
-
             .divider-or {
                 margin: 12px 0 10px;
                 font-size: 9.5px;
             }
-
             .g_id_signin {
                 transform: scale(0.92);
                 margin-bottom: -4px;
             }
-
             .text-center.mt-3.mb-0.small {
                 margin-top: 10px !important;
                 font-size: 11px !important;
             }
-
             .footer-note {
                 margin-top: 10px;
                 font-size: 10px;
             }
-
             .d-flex.justify-content-between.align-items-center.mb-4.mt-3 {
                 margin-top: 8px !important;
                 margin-bottom: 12px !important;
             }
-
-            .register-card .input-group-custom {
-                margin-bottom: 8px !important;
-            }
         }
 
         @media (max-width: 390px) {
-            .login-wrapper {
-                max-width: 340px;
-            }
-
-            .login-card {
-                padding: 20px 16px 16px;
-            }
-
-            .brand-title {
-                font-size: 20px;
-            }
-
-            .brand-subtitle {
-                display: none;
-            }
-
+            .login-wrapper { max-width: 340px; }
+            .login-card { padding: 20px 16px 16px; }
+            .brand-title { font-size: 20px; }
+            .brand-subtitle { display: none; }
             .welcome-sub {
                 font-size: 10.5px;
                 margin-bottom: 12px;
             }
-
             .form-control {
                 height: 46px;
                 font-size: 16px;
             }
-
             .btn-login {
                 height: 46px;
                 font-size: 13px;
             }
-
             .g_id_signin {
                 transform: scale(0.88);
                 margin-bottom: -10px;
@@ -668,68 +576,45 @@ $registered = isset($_GET['registered']) ? true : false;
         }
 
         @media (max-height: 820px) {
-            .login-shell {
-                padding: 14px 10px;
-            }
-
-            .login-wrapper {
-                max-width: 390px;
-            }
-
+            .login-shell { padding: 14px 10px; }
+            .login-wrapper { max-width: 390px; }
             .login-card {
                 padding: 22px 18px 16px;
                 border-radius: 26px;
             }
-
-            .brand-section {
-                margin-bottom: 12px;
-            }
-
+            .brand-section { margin-bottom: 12px; }
             .brand-logo {
                 width: 50px;
                 height: 50px;
                 margin-bottom: 9px;
                 font-size: 17px;
             }
-
-            .brand-title {
-                font-size: 21px;
-            }
-
-            .brand-subtitle {
-                font-size: 11px;
-            }
-
+            .brand-title { font-size: 21px; }
+            .brand-subtitle { font-size: 11px; }
             .welcome-text {
                 font-size: 17px;
                 margin-top: 8px;
             }
-
             .welcome-sub {
                 font-size: 11px;
                 margin-bottom: 12px;
             }
-
             .alert {
                 font-size: 11px;
                 margin-bottom: 10px;
             }
-
             .input-group-custom {
                 margin-bottom: 12px !important;
             }
-
             .form-label {
                 font-size: 11px;
                 margin-bottom: 5px;
             }
-
             .form-control {
                 height: 46px;
                 font-size: 12.5px;
                 border-radius: 15px;
             }
-
             .toggle-password,
             .input-icon-wrap > i.fa-user,
             .input-icon-wrap > i.fa-lock,
@@ -737,57 +622,34 @@ $registered = isset($_GET['registered']) ? true : false;
             .input-icon-wrap > i.fa-id-card {
                 font-size: 12px;
             }
-
             .form-check-label,
             .forgot-link {
                 font-size: 11px;
             }
-
             .btn-login {
                 height: 46px;
                 font-size: 13px;
                 border-radius: 15px;
             }
-
             .divider-or {
                 margin: 12px 0 10px;
             }
-
             .g_id_signin {
                 transform: scale(0.90);
                 margin-top: -2px;
                 margin-bottom: -8px;
             }
-
             .text-center.mt-3.mb-0.small {
                 margin-top: 9px !important;
                 font-size: 11px !important;
             }
-
             .footer-note {
                 margin-top: 9px;
                 font-size: 9.5px;
             }
-
             .d-flex.justify-content-between.align-items-center.mb-4.mt-3 {
                 margin-top: 7px !important;
                 margin-bottom: 12px !important;
-            }
-
-            .register-card .input-group-custom {
-                margin-bottom: 8px !important;
-            }
-
-            .register-card .welcome-sub {
-                margin-bottom: 10px;
-            }
-
-            .register-card .form-control {
-                height: 44px;
-            }
-
-            .register-card .btn-login {
-                height: 46px;
             }
         }
     </style>
@@ -827,7 +689,9 @@ $registered = isset($_GET['registered']) ? true : false;
                 </div>
             <?php endif; ?>
 
-            <form id="loginForm" novalidate>
+            <form id="loginForm" method="POST" novalidate>
+                <?php echo csrfField(); ?>
+
                 <div class="mb-3 input-group-custom">
                     <label for="username" class="form-label">Username or Email</label>
                     <div class="input-icon-wrap">
@@ -852,7 +716,6 @@ $registered = isset($_GET['registered']) ? true : false;
                         <input class="form-check-input" type="checkbox" id="rememberMe" name="rememberMe">
                         <label class="form-check-label small" for="rememberMe">Remember me</label>
                     </div>
-                    <a href="#" class="forgot-link small">Forgot password?</a>
                 </div>
 
                 <button type="submit" class="btn btn-login w-100" id="loginBtn">
@@ -900,6 +763,23 @@ $registered = isset($_GET['registered']) ? true : false;
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    window.CSRF_TOKEN = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
     const htmlEl = document.documentElement;
     const themeToggle = document.getElementById('themeToggle');
     const themeIcon = document.getElementById('themeIcon');
@@ -908,26 +788,33 @@ $registered = isset($_GET['registered']) ? true : false;
 
     function applyTheme(theme) {
         htmlEl.setAttribute('data-theme', theme);
-        localStorage.setItem('loginTheme', theme);
-        themeIcon.className = theme === 'dark'
-            ? 'fa-solid fa-sun'
-            : 'fa-solid fa-moon';
+        safeSetStorage('loginTheme', theme);
+
+        if (themeIcon) {
+            themeIcon.className = theme === 'dark'
+                ? 'fa-solid fa-sun'
+                : 'fa-solid fa-moon';
+        }
     }
 
-    const savedTheme = localStorage.getItem('loginTheme') || 'dark';
+    const savedTheme = safeGetStorage('loginTheme', 'dark');
     applyTheme(savedTheme);
 
-    themeToggle.addEventListener('click', () => {
-        const currentTheme = htmlEl.getAttribute('data-theme') || 'dark';
-        applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
-    });
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = htmlEl.getAttribute('data-theme') || 'dark';
+            applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+        });
+    }
 
-    togglePassword.addEventListener('click', () => {
-        const isPassword = passwordInput.type === 'password';
-        passwordInput.type = isPassword ? 'text' : 'password';
-        togglePassword.classList.toggle('fa-eye');
-        togglePassword.classList.toggle('fa-eye-slash');
-    });
+    if (togglePassword && passwordInput) {
+        togglePassword.addEventListener('click', () => {
+            const isPassword = passwordInput.type === 'password';
+            passwordInput.type = isPassword ? 'text' : 'password';
+            togglePassword.classList.toggle('fa-eye');
+            togglePassword.classList.toggle('fa-eye-slash');
+        });
+    }
 </script>
 <script src="../assets/js/login.js"></script>
 </body>

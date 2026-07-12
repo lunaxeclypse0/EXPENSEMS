@@ -2,17 +2,15 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/db_connect.php';
+require_once __DIR__ . '/../config/bootstrap.php';
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-if (empty($_SESSION['user_id'])) {
-    header('Location: ../auth/login.php');
-    exit;
-}
+requireLogin();
 
 $currentPath = $_SERVER['PHP_SELF'] ?? '';
+
+$stmt = $conn->prepare("SELECT * FROM categories ORDER BY name ASC");
+$stmt->execute();
+$categories = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -267,9 +265,11 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
             </a>
 
-            <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
-                <i class="fa-solid fa-users"></i> <span>Users</span>
-            </a>
+            <?php if (isAdmin()): ?>
+                <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
+                    <i class="fa-solid fa-users"></i> <span>Users</span>
+                </a>
+            <?php endif; ?>
 
             <a href="../settings/index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
@@ -323,43 +323,43 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php
-                        $stmt = $conn->prepare("SELECT * FROM categories ORDER BY name ASC");
-                        $stmt->execute();
-                        $categories = $stmt->fetchAll();
-
-                        if (count($categories) === 0) {
-                            echo "<tr><td colspan='3' class='text-center text-muted py-4'>No categories found.</td></tr>";
-                        } else {
-                            foreach ($categories as $row) {
-                                $id = (int)$row['id'];
-                                $name = htmlspecialchars(trim($row['name']));
-
-                                echo "
+                        <?php if (count($categories) === 0): ?>
+                            <tr>
+                                <td colspan="3" class="text-center text-muted py-4">No categories found.</td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($categories as $row): ?>
+                                <?php
+                                $id = (int) $row['id'];
+                                $name = e(trim((string) $row['name']));
+                                ?>
                                 <tr>
-                                    <td class='id-cell'>
-                                        <span class='id-badge'>{$id}</span>
+                                    <td class="id-cell">
+                                        <span class="id-badge"><?php echo $id; ?></span>
                                     </td>
-                                    <td class='name-cell'>
-                                        <div class='name-wrap'>
-                                            <span class='name-dot'></span>
-                                            <span class='name-text'>{$name}</span>
+                                    <td class="name-cell">
+                                        <div class="name-wrap">
+                                            <span class="name-dot"></span>
+                                            <span class="name-text"><?php echo $name; ?></span>
                                         </div>
                                     </td>
-                                    <td class='actions-cell'>
-                                        <div class='action-group'>
-                                            <a href='edit_category.php?id={$id}' class='action-icon' title='Edit'>
-                                                <i class='fa-solid fa-pen'></i>
+                                    <td class="actions-cell">
+                                        <div class="action-group">
+                                            <a href="edit_category.php?id=<?php echo $id; ?>" class="action-icon" title="Edit">
+                                                <i class="fa-solid fa-pen"></i>
                                             </a>
-                                            <a href='delete_category.php?id={$id}' class='action-icon delete' title='Delete' onclick='return confirm(\"Delete this category?\")'>
-                                                <i class='fa-solid fa-trash'></i>
-                                            </a>
+                                            <form method="post" action="delete_category.php" class="d-inline" onsubmit="return confirm('Delete this category?')">
+                                                <input type="hidden" name="id" value="<?php echo $id; ?>">
+                                                <input type="hidden" name="csrf_token" value="<?php echo e(csrfToken()); ?>">
+                                                <button type="submit" class="action-icon delete border-0 bg-transparent" title="Delete category">
+                                                    <i class="fa-solid fa-trash"></i>
+                                                </button>
+                                            </form>
                                         </div>
                                     </td>
-                                </tr>";
-                            }
-                        }
-                        ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -382,6 +382,22 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
 
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {
+        }
+    }
+
     if (sidebarToggle) {
         sidebarToggle.addEventListener('click', () => {
             sidebar.classList.add('active');
@@ -396,7 +412,7 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
         });
     }
 
-    const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
     if (savedCollapse && mainSidebar) {
         mainSidebar.classList.add('collapsed');
     }
@@ -404,11 +420,11 @@ $currentPath = $_SERVER['PHP_SELF'] ?? '';
     if (collapseToggle) {
         collapseToggle.addEventListener('click', () => {
             mainSidebar.classList.toggle('collapsed');
-            localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
         });
     }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedTheme = safeGetStorage('theme', 'light');
     document.documentElement.setAttribute('data-theme', savedTheme);
 </script>
 </body>

@@ -1,6 +1,37 @@
-<?php require_once '../config/database.php';
-$database = new Database();
-$conn = $database->connect();
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/bootstrap.php';
+require_once __DIR__ . '/../config/db_connect.php';
+
+requireAdmin();
+
+$currentPath = $_SERVER['PHP_SELF'] ?? '';
+
+$users = $conn->query('
+    SELECT id, fullname, username, email, role, created_at
+    FROM users
+    ORDER BY fullname ASC, id ASC
+')->fetchAll(PDO::FETCH_ASSOC);
+
+$success = (string) ($_GET['success'] ?? '');
+$error = (string) ($_GET['error'] ?? '');
+
+$successMessages = [
+    'created' => 'User created successfully.',
+    'updated' => 'User updated successfully.',
+    'deleted' => 'User deleted successfully.',
+];
+
+$errorMessages = [
+    'invalid_user' => 'The selected user is invalid.',
+    'user_not_found' => 'The user could not be found.',
+    'last_admin' => 'You cannot delete the last administrator.',
+    'user_has_expenses' => 'This user cannot be deleted because they still have expenses.',
+];
+
+$successMessage = $successMessages[$success] ?? '';
+$errorMessage = $errorMessages[$error] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -15,13 +46,15 @@ $conn = $database->connect();
     <style>
         .btn-add { background: #2563eb; color: #fff; border-radius: 8px; padding: 10px 20px; font-weight: 500; text-decoration: none; }
         .btn-add:hover { background: #1d4ed8; color: #fff; }
-        .action-icon { color: var(--text-secondary); margin-right: 12px; text-decoration: none; }
+        .action-icon { color: var(--text-secondary); margin-right: 12px; text-decoration: none; background: none; border: none; padding: 0; font-size: 14px; cursor: pointer; }
         .action-icon:hover { color: var(--accent); }
         .action-icon.delete:hover { color: #dc2626; }
         .users-table th { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; border-bottom: 1px solid var(--border-color); padding: 14px; }
         .users-table td { padding: 14px; border-bottom: 1px solid var(--border-color); color: var(--text-primary); vertical-align: middle; }
         .role-badge { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
         .role-badge.staff { background: #ecfdf5; color: #047857; }
+        .role-badge.admin { background: #eff6ff; color: #1d4ed8; }
+        .inline-delete-form { display: inline; }
     </style>
 </head>
 <body>
@@ -33,29 +66,32 @@ $conn = $database->connect();
             <div class="brand-logo"><i class="fa-solid fa-wallet"></i></div>
             <span class="brand-text">Expense<b>MS</b></span>
         </a>
-        <button class="collapse-toggle" id="collapseToggle" title="Collapse sidebar">
+
+        <button class="collapse-toggle" id="collapseToggle" title="Collapse sidebar" type="button">
             <i class="fa-solid fa-angles-left"></i>
         </button>
+
         <nav class="sidebar-nav">
-            <a href="../views/dashboard.php" class="nav-item" data-label="Dashboard">
+            <a href="../views/dashboard.php" class="nav-item <?php echo strpos($currentPath, '/views/dashboard.php') !== false ? 'active' : ''; ?>" data-label="Dashboard">
                 <i class="fa-solid fa-grid-2"></i> <span>Dashboard</span>
             </a>
-            <a href="../expenses/index.php" class="nav-item" data-label="Expenses">
+            <a href="../expenses/index.php" class="nav-item <?php echo strpos($currentPath, '/expenses/') !== false ? 'active' : ''; ?>" data-label="Expenses">
                 <i class="fa-solid fa-receipt"></i> <span>Expenses</span>
             </a>
-            <a href="../categories/index.php" class="nav-item" data-label="Categories">
+            <a href="../categories/index.php" class="nav-item <?php echo strpos($currentPath, '/categories/') !== false ? 'active' : ''; ?>" data-label="Categories">
                 <i class="fa-solid fa-tags"></i> <span>Categories</span>
             </a>
-            <a href="../reports/index.php" class="nav-item" data-label="Reports">
+            <a href="../reports/index.php" class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>" data-label="Reports">
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
             </a>
-            <a href="index.php" class="nav-item active" data-label="Users">
+            <a href="index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
                 <i class="fa-solid fa-users"></i> <span>Users</span>
             </a>
-            <a href="../settings/index.php" class="nav-item" data-label="Settings">
+            <a href="../settings/index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
             </a>
         </nav>
+
         <div class="sidebar-footer">
             <a href="../auth/logout.php" id="logoutBtn" class="nav-item logout" data-label="Log out">
                 <i class="fa-solid fa-right-from-bracket"></i> <span>Log out</span>
@@ -65,7 +101,7 @@ $conn = $database->connect();
 
     <main class="main-content">
         <div class="topbar">
-            <button class="icon-btn" id="sidebarToggle" title="Menu">
+            <button class="icon-btn" id="sidebarToggle" title="Menu" type="button">
                 <i class="fa-solid fa-bars"></i>
             </button>
             <div>
@@ -77,39 +113,66 @@ $conn = $database->connect();
             </div>
         </div>
 
+        <?php if ($successMessage !== ''): ?>
+            <div class="settings-alert success">
+                <i class="fa-solid fa-circle-check"></i> <?php echo e($successMessage); ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($errorMessage !== ''): ?>
+            <div class="settings-alert error">
+                <i class="fa-solid fa-circle-exclamation"></i> <?php echo e($errorMessage); ?>
+            </div>
+        <?php endif; ?>
+
         <div class="panel">
             <div class="table-responsive">
                 <table class="users-table w-100">
                     <thead>
-                        <tr><th>ID</th><th>Full Name</th><th>Username</th><th>Email</th><th>Role</th><th>Date Added</th><th class="text-end">Actions</th></tr>
+                        <tr>
+                            <th>Full Name</th>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Created</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
                     </thead>
                     <tbody>
-                        <?php
-                        $stmt = $conn->prepare("SELECT * FROM users WHERE role != 'admin' ORDER BY id ASC");
-                        $stmt->execute();
-                        $users = $stmt->fetchAll();
-
-                        if (count($users) === 0) {
-                            echo "<tr><td colspan='7' class='text-center text-muted py-4'>No users found.</td></tr>";
-                        } else {
-                            $displayNumber = 1;
-                            foreach ($users as $row) {
-                                echo "<tr>
-                                    <td>{$displayNumber}</td>
-                                    <td>{$row['fullname']}</td>
-                                    <td>{$row['username']}</td>
-                                    <td>{$row['email']}</td>
-                                    <td><span class='role-badge staff'>{$row['role']}</span></td>
-                                    <td>" . date('M d, Y', strtotime($row['created_at'])) . "</td>
-                                    <td class='text-end'>
-                                        <a href='edit_user.php?id={$row['id']}' class='action-icon'><i class='fa-solid fa-pen'></i></a>
-                                        <a href='delete_user.php?id={$row['id']}' class='action-icon delete' onclick='return confirm(\"Delete this user?\")'><i class='fa-solid fa-trash'></i></a>
+                        <?php if (count($users) === 0): ?>
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">No users found.</td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($users as $user): ?>
+                                <tr>
+                                    <td><?php echo e($user['fullname']); ?></td>
+                                    <td><?php echo e($user['username']); ?></td>
+                                    <td><?php echo e($user['email']); ?></td>
+                                    <td>
+                                        <span class="role-badge <?php echo $user['role'] === 'admin' ? 'admin' : 'staff'; ?>">
+                                            <?php echo e(ucfirst($user['role'])); ?>
+                                        </span>
                                     </td>
-                                </tr>";
-                                $displayNumber++;
-                            }
-                        }
-                        ?>
+                                    <td><?php echo e(date('M d, Y', strtotime((string) $user['created_at']))); ?></td>
+                                    <td class="text-end">
+                                        <a class="action-icon" href="edit_user.php?id=<?php echo (int) $user['id']; ?>">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </a>
+
+                                        <?php if ((int) $user['id'] !== currentUserId()): ?>
+                                            <form class="inline-delete-form" method="post" action="delete_user.php" onsubmit="return confirm('Delete this user?')">
+                                                <?php echo csrfField(); ?>
+                                                <input type="hidden" name="id" value="<?php echo (int) $user['id']; ?>">
+                                                <button class="action-icon delete" type="submit">
+                                                    <i class="fa-solid fa-trash"></i>
+                                                </button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -121,32 +184,54 @@ $conn = $database->connect();
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
     const sidebarToggle = document.getElementById('sidebarToggle');
     const sidebar = document.querySelector('.sidebar');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
-
-    sidebarToggle.addEventListener('click', () => {
-        sidebar.classList.add('active');
-        sidebarOverlay.classList.add('active');
-    });
-
-    sidebarOverlay.addEventListener('click', () => {
-        sidebar.classList.remove('active');
-        sidebarOverlay.classList.remove('active');
-    });
-
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
 
-    const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
-    if (savedCollapse) mainSidebar.classList.add('collapsed');
+    if (sidebarToggle && sidebar && sidebarOverlay) {
+        sidebarToggle.addEventListener('click', () => {
+            sidebar.classList.add('active');
+            sidebarOverlay.classList.add('active');
+        });
+    }
 
-    collapseToggle.addEventListener('click', () => {
-        mainSidebar.classList.toggle('collapsed');
-        localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
-    });
+    if (sidebarOverlay && sidebar) {
+        sidebarOverlay.addEventListener('click', () => {
+            sidebar.classList.remove('active');
+            sidebarOverlay.classList.remove('active');
+        });
+    }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
+    if (savedCollapse && mainSidebar) {
+        mainSidebar.classList.add('collapsed');
+    }
+
+    if (collapseToggle && mainSidebar) {
+        collapseToggle.addEventListener('click', () => {
+            mainSidebar.classList.toggle('collapsed');
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
+        });
+    }
+
+    const savedTheme = safeGetStorage('theme', 'light');
     document.documentElement.setAttribute('data-theme', savedTheme);
 </script>
 </body>

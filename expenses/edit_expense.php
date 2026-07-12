@@ -1,85 +1,295 @@
 <?php
 declare(strict_types=1);
+
+require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db_connect.php';
-$id = $_GET['id'];
 
-$catStmt = $conn->prepare("SELECT * FROM categories ORDER BY name ASC");
-$catStmt->execute();
-$categories = $catStmt->fetchAll();
+requireLogin();
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $stmt = $conn->prepare("UPDATE expenses SET expense_date=:expense_date, category=:category, description=:description, amount=:amount, payment_method=:payment_method, remarks=:remarks WHERE id=:id");
-    $stmt->execute([
-        'expense_date' => $_POST['expense_date'], 'category' => $_POST['category'],
-        'description' => $_POST['description'], 'amount' => $_POST['amount'],
-        'payment_method' => $_POST['payment_method'], 'remarks' => $_POST['remarks'],
-        'id' => $_POST['id'],
-    ]);
-    header("Location: index.php");
-    exit();
+$id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, [
+    'options' => ['min_range' => 1]
+]);
+
+if (!$id) {
+    redirectTo('index.php?error=invalid_expense');
 }
 
-$stmt = $conn->prepare("SELECT * FROM expenses WHERE id = :id");
-$stmt->execute(['id' => $id]);
-$expense = $stmt->fetch();
+$scope = isAdmin() ? '' : ' AND user_id = :user_id';
+
+$stmt = $conn->prepare('SELECT * FROM expenses WHERE id = :id' . $scope . ' LIMIT 1');
+$params = ['id' => $id];
+
+if (!isAdmin()) {
+    $params['user_id'] = currentUserId();
+}
+
+$stmt->execute($params);
+$expense = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$expense) {
+    http_response_code(404);
+    exit('Expense not found.');
+}
+
+$catStmt = $conn->prepare('SELECT id, name FROM categories ORDER BY name ASC');
+$catStmt->execute();
+$categories = $catStmt->fetchAll(PDO::FETCH_ASSOC);
+
+$errors = [];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrfOrAbort();
+
+    $updated = expenseInput($_POST);
+    $errors = validateExpenseInput($conn, $updated);
+
+    if (!$errors) {
+        $update = $conn->prepare('
+            UPDATE expenses
+            SET title = :title,
+                expense_date = :expense_date,
+                category = :category,
+                description = :description,
+                amount = :amount,
+                payment_method = :payment_method,
+                remarks = :remarks
+            WHERE id = :id' . $scope);
+
+        $updateParams = [
+            'title' => $updated['category'],
+            'expense_date' => $updated['expense_date'],
+            'category' => $updated['category'],
+            'description' => $updated['description'],
+            'amount' => $updated['amount'],
+            'payment_method' => $updated['payment_method'],
+            'remarks' => $updated['remarks'],
+            'id' => $id,
+        ];
+
+        if (!isAdmin()) {
+            $updateParams['user_id'] = currentUserId();
+        }
+
+        $update->execute($updateParams);
+        redirectTo('index.php?success=updated');
+    }
+
+    $expense = array_merge($expense, $updated);
+}
+
+$currentPath = $_SERVER['PHP_SELF'] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Edit Expense</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Expense | Expense Management System</title>
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Poppins', sans-serif; background: #f4f6f9; }
-        .form-card { max-width: 640px; margin: 50px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); padding: 32px; }
-        .form-card h2 { font-weight: 600; color: #1e2a3a; margin-bottom: 4px; }
-        .form-card p.sub { color: #64748b; margin-bottom: 24px; }
-        label { font-weight: 500; color: #334155; margin-bottom: 6px; }
-        .form-control, .form-select { border-radius: 8px; padding: 10px 14px; border: 1px solid #dfe3ea; margin-bottom: 18px; }
-        .form-control:focus, .form-select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
-        .btn-save { background: #2563eb; color: #fff; border-radius: 8px; padding: 10px 24px; font-weight: 500; border: none; }
-        .btn-save:hover { background: #1d4ed8; }
-        .btn-cancel { color: #64748b; text-decoration: none; padding: 10px 20px; font-weight: 500; }
-    </style>
+
+    <link rel="stylesheet" href="../assets/css/dashboard.css">
+    <link rel="stylesheet" href="../assets/css/expense-form.css">
 </head>
 <body>
-<div class="form-card">
-    <h2><i class="fa-solid fa-pen me-2"></i>Edit Expense</h2>
-    <p class="sub">Update the details of this expense record.</p>
-    <form method="POST" action="edit_expense.php">
-        <input type="hidden" name="id" value="<?php echo $expense['id']; ?>">
 
-        <label>Expense Date</label>
-        <input type="date" class="form-control" name="expense_date" value="<?php echo $expense['expense_date']; ?>" required>
+<div class="app-wrapper">
+    <aside class="sidebar" id="mainSidebar">
+        <a href="../views/dashboard.php" class="sidebar-brand" style="text-decoration: none;">
+            <div class="brand-logo"><i class="fa-solid fa-wallet"></i></div>
+            <span class="brand-text">Expense<b>MS</b></span>
+        </a>
 
-        <label>Category</label>
-        <select class="form-select" name="category" required>
-            <?php foreach ($categories as $cat): ?>
-                <option value="<?php echo htmlspecialchars($cat['name']); ?>" <?php echo ($cat['name'] == $expense['category']) ? 'selected' : ''; ?>>
-                    <?php echo htmlspecialchars($cat['name']); ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
+        <button class="collapse-toggle" id="collapseToggle" title="Collapse sidebar" type="button">
+            <i class="fa-solid fa-angles-left"></i>
+        </button>
 
-        <label>Description</label>
-        <textarea class="form-control" name="description" rows="3" required><?php echo htmlspecialchars($expense['description']); ?></textarea>
+        <nav class="sidebar-nav">
+            <a href="../views/dashboard.php"
+            class="nav-item <?php echo strpos($currentPath, '/views/dashboard.php') !== false ? 'active' : ''; ?>"
+            data-label="Dashboard">
+                <i class="fa-solid fa-grid-2"></i> <span>Dashboard</span>
+            </a>
 
-        <label>Amount (₱)</label>
-        <input type="number" step="0.01" class="form-control" name="amount" value="<?php echo $expense['amount']; ?>" required>
+            <a href="../expenses/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/expenses/') !== false ? 'active' : ''; ?>"
+            data-label="Expenses">
+                <i class="fa-solid fa-receipt"></i> <span>Expenses</span>
+            </a>
 
-        <label>Payment Method</label>
-        <input type="text" class="form-control" name="payment_method" value="<?php echo htmlspecialchars($expense['payment_method']); ?>" required>
+            <a href="../categories/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/categories/') !== false ? 'active' : ''; ?>"
+            data-label="Categories">
+                <i class="fa-solid fa-tags"></i> <span>Categories</span>
+            </a>
 
-        <label>Remarks</label>
-        <textarea class="form-control" name="remarks" rows="2"><?php echo htmlspecialchars($expense['remarks']); ?></textarea>
+            <a href="../reports/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>"
+            data-label="Reports">
+                <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
+            </a>
 
-        <div class="d-flex justify-content-end mt-3">
-            <a href="index.php" class="btn-cancel">Cancel</a>
-            <button type="submit" class="btn-save">Update Expense</button>
+            <?php if (isAdmin()): ?>
+                <a href="../users/index.php"
+                class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>"
+                data-label="Users">
+                    <i class="fa-solid fa-users"></i> <span>Users</span>
+                </a>
+            <?php endif; ?>
+
+            <a href="../settings/index.php"
+            class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>"
+            data-label="Settings">
+                <i class="fa-solid fa-gear"></i> <span>Settings</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="../auth/logout.php" class="nav-item logout" data-label="Log out">
+                <i class="fa-solid fa-right-from-bracket"></i> <span>Log out</span>
+            </a>
         </div>
-    </form>
+    </aside>
+
+    <main class="main-content expense-form-page">
+        <div class="topbar">
+            <button class="icon-btn" id="sidebarToggle" title="Menu" type="button">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+
+            <div>
+                <h1 class="page-title">Edit Expense</h1>
+                <p class="page-sub">Update the details of this expense record.</p>
+            </div>
+        </div>
+
+        <div class="expense-form-container">
+            <section class="panel expense-form-panel">
+                <?php if ($errors): ?>
+                    <div class="alert alert-danger">
+                        <ul class="mb-0">
+                            <?php foreach ($errors as $error): ?>
+                                <li><?php echo e($error); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+
+                <form method="POST" action="edit_expense.php?id=<?php echo (int) $id; ?>" novalidate>
+                    <?php echo csrfField(); ?>
+
+                    <div class="expense-form-grid">
+                        <div class="expense-field">
+                            <label for="expense_date">Expense Date</label>
+                            <input id="expense_date" type="date" class="form-control" name="expense_date" value="<?php echo e($expense['expense_date']); ?>" required>
+                        </div>
+
+                        <div class="expense-field expense-field-full">
+                            <div class="expense-field-head">
+                                <label for="category">Category</label>
+                                <?php if (isAdmin()): ?>
+                                    <a href="../categories/index.php" class="manage-link">Manage Categories</a>
+                                <?php endif; ?>
+                            </div>
+
+                            <select id="category" class="form-select" name="category" required>
+                                <option value="">Select a category</option>
+                                <?php foreach ($categories as $cat): ?>
+                                    <option value="<?php echo e($cat['name']); ?>" <?php echo $expense['category'] === $cat['name'] ? 'selected' : ''; ?>>
+                                        <?php echo e($cat['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+
+                        <div class="expense-field expense-field-full">
+                            <label for="description">Description</label>
+                            <textarea id="description" class="form-control" name="description" rows="4" placeholder="Brief details about this expense" required><?php echo e($expense['description']); ?></textarea>
+                        </div>
+
+                        <div class="expense-field">
+                            <label for="amount">Amount (₱)</label>
+                            <input id="amount" type="number" step="0.01" min="0.01" class="form-control" name="amount" placeholder="0.00" value="<?php echo e($expense['amount']); ?>" required>
+                        </div>
+
+                        <div class="expense-field">
+                            <label for="payment_method">Payment Method</label>
+                            <input id="payment_method" type="text" class="form-control" name="payment_method" maxlength="50" placeholder="e.g. Cash, GCash, Bank Transfer" value="<?php echo e($expense['payment_method']); ?>" required>
+                        </div>
+
+                        <div class="expense-field expense-field-full">
+                            <label for="remarks">Remarks</label>
+                            <textarea id="remarks" class="form-control" name="remarks" rows="3" placeholder="Optional notes"><?php echo e($expense['remarks']); ?></textarea>
+                        </div>
+                    </div>
+
+                    <div class="expense-form-actions">
+                        <a href="index.php" class="btn-cancel-expense">Cancel</a>
+                        <button type="submit" class="btn-save-expense">
+                            <i class="fa-solid fa-pen"></i>
+                            <span>Update Expense</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+        </div>
+    </main>
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 </div>
+
+<script>
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.querySelector('.sidebar');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const collapseToggle = document.getElementById('collapseToggle');
+    const mainSidebar = document.getElementById('mainSidebar');
+
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', () => {
+            sidebar.classList.add('active');
+            sidebarOverlay.classList.add('active');
+        });
+    }
+
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', () => {
+            sidebar.classList.remove('active');
+            sidebarOverlay.classList.remove('active');
+        });
+    }
+
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
+    if (savedCollapse && mainSidebar) {
+        mainSidebar.classList.add('collapsed');
+    }
+
+    if (collapseToggle) {
+        collapseToggle.addEventListener('click', () => {
+            mainSidebar.classList.toggle('collapsed');
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
+        });
+    }
+
+    const savedTheme = safeGetStorage('theme', 'light');
+    document.documentElement.setAttribute('data-theme', savedTheme);
+</script>
 </body>
 </html>

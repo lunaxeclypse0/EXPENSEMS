@@ -83,9 +83,9 @@ document.addEventListener('DOMContentLoaded', function () {
             hasError = true;
         }
 
-        if (password.length < 6) {
+        if (password.length < 12) {
             passwordInput.classList.add('is-invalid');
-            passwordError.textContent = 'Password must be at least 6 characters.';
+            passwordError.textContent = 'Password must be at least 12 characters.';
             hasError = true;
         }
 

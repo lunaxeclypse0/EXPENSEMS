@@ -1,19 +1,13 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../config/bootstrap.php';
 require_once __DIR__ . '/../config/db_connect.php';
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-if (empty($_SESSION['user_id'])) {
-    header('Location: ../auth/login.php');
-    exit;
-}
+requireLogin();
 
 $currentPath = $_SERVER['PHP_SELF'] ?? '';
-$q = trim($_GET['q'] ?? '');
+$q = trim((string) ($_GET['q'] ?? ''));
 
 $expenseResults = [];
 $categoryResults = [];
@@ -25,44 +19,50 @@ $systemPages = [
         'title' => 'Dashboard',
         'link' => '../views/dashboard.php',
         'description' => 'View your dashboard summary and recent expenses.',
-        'keywords' => ['dashboard', 'home', 'overview', 'main']
+        'keywords' => ['dashboard', 'home', 'overview', 'main'],
     ],
     [
         'title' => 'Expenses',
         'link' => '../expenses/index.php',
         'description' => 'Manage and search all recorded expenses.',
-        'keywords' => ['expense', 'expenses', 'amount', 'spending', 'cost', 'description']
+        'keywords' => ['expense', 'expenses', 'amount', 'spending', 'cost', 'description'],
     ],
     [
         'title' => 'Categories',
         'link' => '../categories/index.php',
         'description' => 'Manage expense categories.',
-        'keywords' => ['category', 'categories', 'tag', 'tags']
+        'keywords' => ['category', 'categories', 'tag', 'tags'],
     ],
     [
         'title' => 'Reports',
         'link' => '../reports/index.php',
         'description' => 'View expense reports and analytics.',
-        'keywords' => ['report', 'reports', 'analytics', 'chart', 'summary']
+        'keywords' => ['report', 'reports', 'analytics', 'chart', 'summary'],
     ],
     [
         'title' => 'Users',
         'link' => '../users/index.php',
         'description' => 'Manage system users.',
-        'keywords' => ['user', 'users', 'admin', 'administrator', 'account list']
+        'keywords' => ['user', 'users', 'admin', 'administrator', 'account list'],
     ],
     [
         'title' => 'Settings',
         'link' => '../settings/index.php',
         'description' => 'Manage your account settings, profile, and password.',
-        'keywords' => ['settings', 'setting', 'profile', 'account', 'password', 'security']
+        'keywords' => ['settings', 'setting', 'profile', 'account', 'password', 'security'],
     ],
 ];
+
+if (!isAdmin()) {
+    $systemPages = array_values(array_filter(
+        $systemPages,
+        static fn(array $page): bool => $page['title'] !== 'Users'
+    ));
+}
 
 if ($q !== '') {
     $qLower = strtolower($q);
 
-    // 1. Exact / smart page redirect
     foreach ($systemPages as $page) {
         if (strtolower($page['title']) === $qLower) {
             header('Location: ' . $page['link']);
@@ -77,15 +77,20 @@ if ($q !== '') {
         }
     }
 
-    // 2. Partial page matches for results listing
     foreach ($systemPages as $page) {
         $matched = false;
 
-        if (stripos($page['title'], $q) !== false || stripos($page['description'], $q) !== false) {
+        if (
+            stripos($page['title'], $q) !== false ||
+            stripos($page['description'], $q) !== false
+        ) {
             $matched = true;
         } else {
             foreach ($page['keywords'] as $keyword) {
-                if (stripos($keyword, $qLower) !== false || stripos($qLower, $keyword) !== false) {
+                if (
+                    stripos($keyword, $qLower) !== false ||
+                    stripos($qLower, $keyword) !== false
+                ) {
                     $matched = true;
                     break;
                 }
@@ -99,49 +104,67 @@ if ($q !== '') {
 
     $searchTerm = '%' . $q . '%';
 
-    $stmt = $conn->prepare("
-        SELECT id, title, amount, expense_date
-        FROM expenses
-        WHERE title LIKE :title_q
-           OR description LIKE :description_q
-        ORDER BY expense_date DESC
-        LIMIT 10
-    ");
-    $stmt->execute([
-        'title_q' => $searchTerm,
-        'description_q' => $searchTerm
-    ]);
-    $expenseResults = $stmt->fetchAll();
+    if (isAdmin()) {
+        $expenseSql = "
+            SELECT id, title, amount, expense_date
+            FROM expenses
+            WHERE title LIKE :title_q
+               OR description LIKE :description_q
+            ORDER BY expense_date DESC
+            LIMIT 10
+        ";
+        $expenseParams = [
+            'title_q' => $searchTerm,
+            'description_q' => $searchTerm,
+        ];
+    } else {
+        $expenseSql = "
+            SELECT id, title, amount, expense_date
+            FROM expenses
+            WHERE (title LIKE :title_q OR description LIKE :description_q)
+              AND user_id = :user_id
+            ORDER BY expense_date DESC
+            LIMIT 10
+        ";
+        $expenseParams = [
+            'title_q' => $searchTerm,
+            'description_q' => $searchTerm,
+            'user_id' => currentUserId(),
+        ];
+    }
 
-    $stmt = $conn->prepare("
+    $stmt = $conn->prepare($expenseSql);
+    $stmt->execute($expenseParams);
+    $expenseResults = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt = $conn->prepare('
         SELECT id, name
         FROM categories
         WHERE name LIKE :category_q
         ORDER BY name ASC
         LIMIT 10
-    ");
-    $stmt->execute([
-        'category_q' => $searchTerm
-    ]);
-    $categoryResults = $stmt->fetchAll();
+    ');
+    $stmt->execute(['category_q' => $searchTerm]);
+    $categoryResults = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt = $conn->prepare("
-        SELECT id, fullname, username, email
-        FROM users
-        WHERE fullname LIKE :fullname_q
-           OR username LIKE :username_q
-           OR email LIKE :email_q
-        ORDER BY fullname ASC
-        LIMIT 10
-    ");
-    $stmt->execute([
-        'fullname_q' => $searchTerm,
-        'username_q' => $searchTerm,
-        'email_q' => $searchTerm
-    ]);
-    $userResults = $stmt->fetchAll();
+    if (isAdmin()) {
+        $stmt = $conn->prepare('
+            SELECT id, fullname, username, email
+            FROM users
+            WHERE fullname LIKE :fullname_q
+               OR username LIKE :username_q
+               OR email LIKE :email_q
+            ORDER BY fullname ASC
+            LIMIT 10
+        ');
+        $stmt->execute([
+            'fullname_q' => $searchTerm,
+            'username_q' => $searchTerm,
+            'email_q' => $searchTerm,
+        ]);
+        $userResults = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 
-    // 3. Optional: if exactly one page result and no DB results, redirect
     if (count($pageResults) === 1 && empty($expenseResults) && empty($categoryResults) && empty($userResults)) {
         header('Location: ' . $pageResults[0]['link']);
         exit;
@@ -252,18 +275,25 @@ if ($q !== '') {
             <a href="../views/dashboard.php" class="nav-item <?php echo strpos($currentPath, '/views/dashboard.php') !== false ? 'active' : ''; ?>" data-label="Dashboard">
                 <i class="fa-solid fa-grid-2"></i> <span>Dashboard</span>
             </a>
+
             <a href="../expenses/index.php" class="nav-item <?php echo strpos($currentPath, '/expenses/') !== false ? 'active' : ''; ?>" data-label="Expenses">
                 <i class="fa-solid fa-receipt"></i> <span>Expenses</span>
             </a>
+
             <a href="../categories/index.php" class="nav-item <?php echo strpos($currentPath, '/categories/') !== false ? 'active' : ''; ?>" data-label="Categories">
                 <i class="fa-solid fa-tags"></i> <span>Categories</span>
             </a>
+
             <a href="../reports/index.php" class="nav-item <?php echo strpos($currentPath, '/reports/') !== false ? 'active' : ''; ?>" data-label="Reports">
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
             </a>
-            <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
-                <i class="fa-solid fa-users"></i> <span>Users</span>
-            </a>
+
+            <?php if (isAdmin()): ?>
+                <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
+                    <i class="fa-solid fa-users"></i> <span>Users</span>
+                </a>
+            <?php endif; ?>
+
             <a href="../settings/index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
             </a>
@@ -291,7 +321,7 @@ if ($q !== '') {
         <div class="search-page-box">
             <form class="search-form-global" method="GET" action="index.php">
                 <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                <input type="text" name="q" placeholder="Search the whole system..." value="<?php echo htmlspecialchars($q); ?>">
+                <input type="text" name="q" placeholder="Search the whole system..." value="<?php echo e($q); ?>">
             </form>
         </div>
 
@@ -307,9 +337,9 @@ if ($q !== '') {
                     <div class="empty-search">No matching pages found.</div>
                 <?php else: ?>
                     <?php foreach ($pageResults as $page): ?>
-                        <a href="<?php echo htmlspecialchars($page['link']); ?>" class="search-result-item">
-                            <div class="search-result-title"><?php echo htmlspecialchars($page['title']); ?></div>
-                            <div class="search-result-meta"><?php echo htmlspecialchars($page['description']); ?></div>
+                        <a href="<?php echo e($page['link']); ?>" class="search-result-item">
+                            <div class="search-result-title"><?php echo e($page['title']); ?></div>
+                            <div class="search-result-meta"><?php echo e($page['description']); ?></div>
                         </a>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -322,10 +352,10 @@ if ($q !== '') {
                 <?php else: ?>
                     <?php foreach ($expenseResults as $row): ?>
                         <a href="../expenses/index.php?search_description=<?php echo urlencode($q); ?>" class="search-result-item">
-                            <div class="search-result-title"><?php echo htmlspecialchars($row['title']); ?></div>
+                            <div class="search-result-title"><?php echo e($row['title'] ?? 'Untitled Expense'); ?></div>
                             <div class="search-result-meta">
-                                ₱<?php echo number_format((float)$row['amount'], 2); ?> •
-                                <?php echo date('M d, Y', strtotime((string)$row['expense_date'])); ?>
+                                ₱<?php echo number_format((float) ($row['amount'] ?? 0), 2); ?> •
+                                <?php echo e(date('M d, Y', strtotime((string) $row['expense_date']))); ?>
                             </div>
                         </a>
                     <?php endforeach; ?>
@@ -339,29 +369,31 @@ if ($q !== '') {
                 <?php else: ?>
                     <?php foreach ($categoryResults as $row): ?>
                         <a href="../categories/index.php" class="search-result-item">
-                            <div class="search-result-title"><?php echo htmlspecialchars($row['name']); ?></div>
-                            <div class="search-result-meta">Category ID: <?php echo (int)$row['id']; ?></div>
+                            <div class="search-result-title"><?php echo e($row['name']); ?></div>
+                            <div class="search-result-meta">Category ID: <?php echo (int) $row['id']; ?></div>
                         </a>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
 
-            <div class="search-section">
-                <h3>Users</h3>
-                <?php if (empty($userResults)): ?>
-                    <div class="empty-search">No matching users found.</div>
-                <?php else: ?>
-                    <?php foreach ($userResults as $row): ?>
-                        <a href="../users/index.php" class="search-result-item">
-                            <div class="search-result-title"><?php echo htmlspecialchars($row['fullname']); ?></div>
-                            <div class="search-result-meta">
-                                @<?php echo htmlspecialchars($row['username']); ?> •
-                                <?php echo htmlspecialchars($row['email']); ?>
-                            </div>
-                        </a>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
+            <?php if (isAdmin()): ?>
+                <div class="search-section">
+                    <h3>Users</h3>
+                    <?php if (empty($userResults)): ?>
+                        <div class="empty-search">No matching users found.</div>
+                    <?php else: ?>
+                        <?php foreach ($userResults as $row): ?>
+                            <a href="../users/index.php" class="search-result-item">
+                                <div class="search-result-title"><?php echo e($row['fullname']); ?></div>
+                                <div class="search-result-meta">
+                                    @<?php echo e($row['username']); ?> •
+                                    <?php echo e($row['email']); ?>
+                                </div>
+                            </a>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
 
         <?php endif; ?>
     </main>
@@ -375,6 +407,21 @@ if ($q !== '') {
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
+
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
 
     if (sidebarToggle) {
         sidebarToggle.addEventListener('click', () => {
@@ -390,7 +437,7 @@ if ($q !== '') {
         });
     }
 
-    const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
     if (savedCollapse && mainSidebar) {
         mainSidebar.classList.add('collapsed');
     }
@@ -398,11 +445,11 @@ if ($q !== '') {
     if (collapseToggle) {
         collapseToggle.addEventListener('click', () => {
             mainSidebar.classList.toggle('collapsed');
-            localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
         });
     }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedTheme = safeGetStorage('theme', 'light');
     document.documentElement.setAttribute('data-theme', savedTheme);
 </script>
 

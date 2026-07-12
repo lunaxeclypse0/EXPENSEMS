@@ -1,58 +1,82 @@
 <?php
-require_once __DIR__ . '/../config/database.php';
+declare(strict_types=1);
 
-$database = new Database();
-$conn = $database->connect();
+require_once __DIR__ . '/../config/bootstrap.php';
+require_once __DIR__ . '/../config/db_connect.php';
+
+requireLogin();
+
 $currentPath = $_SERVER['PHP_SELF'] ?? '';
 
-$report_type = $_GET['report_type'] ?? 'daily';
+$report_type = (string) ($_GET['report_type'] ?? 'daily');
 $allowedReportTypes = ['daily', 'monthly', 'range'];
-if (!in_array($report_type, $allowedReportTypes)) {
+
+if (!in_array($report_type, $allowedReportTypes, true)) {
     $report_type = 'daily';
 }
 
 $conditions = [];
 $params = [];
 $results = [];
-$grand_total = 0;
+$grand_total = 0.0;
 $message = '';
 
-if ($report_type === 'daily') {
-    $date = $_GET['report_date'] ?? date('Y-m-d');
-    $conditions[] = "expense_date = :date";
-    $params['date'] = $date;
-} elseif ($report_type === 'monthly') {
-    $month = $_GET['report_month'] ?? date('Y-m');
-    $conditions[] = "DATE_FORMAT(expense_date, '%Y-%m') = :month";
-    $params['month'] = $month;
-} elseif ($report_type === 'range') {
-    $from = $_GET['date_from'] ?? '';
-    $to = $_GET['date_to'] ?? '';
+if (!isAdmin()) {
+    $conditions[] = 'user_id = :user_id';
+    $params['user_id'] = currentUserId();
+}
 
-    if ($from === '' || $to === '') {
+if ($report_type === 'daily') {
+    $date = (string) ($_GET['report_date'] ?? date('Y-m-d'));
+
+    if (!validDate($date)) {
+        $message = 'Please select a valid report date.';
+    } else {
+        $conditions[] = 'expense_date = :date';
+        $params['date'] = $date;
+    }
+} elseif ($report_type === 'monthly') {
+    $month = (string) ($_GET['report_month'] ?? date('Y-m'));
+
+    if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) {
+        $message = 'Please select a valid report month.';
+    } else {
+        $conditions[] = 'expense_date >= :month_start AND expense_date < :month_end';
+        $params['month_start'] = $month . '-01';
+        $params['month_end'] = (new DateTimeImmutable($month . '-01'))
+            ->modify('+1 month')
+            ->format('Y-m-d');
+    }
+} else {
+    $from = (string) ($_GET['date_from'] ?? '');
+    $to = (string) ($_GET['date_to'] ?? '');
+
+    if (!validDate($from) || !validDate($to)) {
         $message = 'Please select both From and To dates.';
     } elseif ($from > $to) {
         $message = 'From Date cannot be later than To Date.';
     } else {
-        $conditions[] = "expense_date BETWEEN :date_from AND :date_to";
+        $conditions[] = 'expense_date BETWEEN :date_from AND :date_to';
         $params['date_from'] = $from;
         $params['date_to'] = $to;
     }
 }
 
 if ($message === '') {
-    $sql = "SELECT * FROM expenses";
+    $sql = 'SELECT id, expense_date, category, description, amount FROM expenses';
+
     if (!empty($conditions)) {
-        $sql .= " WHERE " . implode(" AND ", $conditions);
+        $sql .= ' WHERE ' . implode(' AND ', $conditions);
     }
-    $sql .= " ORDER BY expense_date ASC, id ASC";
+
+    $sql .= ' ORDER BY expense_date ASC, id ASC';
 
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);
-    $results = $stmt->fetchAll();
+    $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($results as $row) {
-        $grand_total += (float)$row['amount'];
+        $grand_total += (float) ($row['amount'] ?? 0);
     }
 }
 ?>
@@ -91,7 +115,7 @@ if ($message === '') {
         .form-control:focus,
         .form-select:focus {
             border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(124,92,255,0.15);
+            box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.15);
         }
 
         .btn-generate {
@@ -190,9 +214,11 @@ if ($message === '') {
                 <i class="fa-solid fa-chart-line"></i> <span>Reports</span>
             </a>
 
-            <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
-                <i class="fa-solid fa-users"></i> <span>Users</span>
-            </a>
+            <?php if (isAdmin()): ?>
+                <a href="../users/index.php" class="nav-item <?php echo strpos($currentPath, '/users/') !== false ? 'active' : ''; ?>" data-label="Users">
+                    <i class="fa-solid fa-users"></i> <span>Users</span>
+                </a>
+            <?php endif; ?>
 
             <a href="../settings/index.php" class="nav-item <?php echo strpos($currentPath, '/settings/') !== false ? 'active' : ''; ?>" data-label="Settings">
                 <i class="fa-solid fa-gear"></i> <span>Settings</span>
@@ -233,26 +259,26 @@ if ($message === '') {
 
         <div class="panel mb-4">
             <form method="GET" action="index.php" class="row g-2 align-items-end">
-                <input type="hidden" name="report_type" value="<?php echo htmlspecialchars($report_type); ?>">
+                <input type="hidden" name="report_type" value="<?php echo e($report_type); ?>">
 
                 <?php if ($report_type === 'daily'): ?>
                     <div class="col-md-4">
                         <label class="form-label small text-muted mb-1">Select Date</label>
-                        <input type="date" name="report_date" class="form-control" value="<?php echo htmlspecialchars($_GET['report_date'] ?? date('Y-m-d')); ?>">
+                        <input type="date" name="report_date" class="form-control" value="<?php echo e($_GET['report_date'] ?? date('Y-m-d')); ?>">
                     </div>
                 <?php elseif ($report_type === 'monthly'): ?>
                     <div class="col-md-4">
                         <label class="form-label small text-muted mb-1">Select Month</label>
-                        <input type="month" name="report_month" class="form-control" value="<?php echo htmlspecialchars($_GET['report_month'] ?? date('Y-m')); ?>">
+                        <input type="month" name="report_month" class="form-control" value="<?php echo e($_GET['report_month'] ?? date('Y-m')); ?>">
                     </div>
                 <?php else: ?>
                     <div class="col-md-4">
                         <label class="form-label small text-muted mb-1">From Date</label>
-                        <input type="date" name="date_from" class="form-control" value="<?php echo htmlspecialchars($_GET['date_from'] ?? ''); ?>">
+                        <input type="date" name="date_from" class="form-control" value="<?php echo e($_GET['date_from'] ?? ''); ?>">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label small text-muted mb-1">To Date</label>
-                        <input type="date" name="date_to" class="form-control" value="<?php echo htmlspecialchars($_GET['date_to'] ?? ''); ?>">
+                        <input type="date" name="date_to" class="form-control" value="<?php echo e($_GET['date_to'] ?? ''); ?>">
                     </div>
                 <?php endif; ?>
 
@@ -278,7 +304,7 @@ if ($message === '') {
                     <tbody>
                         <?php if ($message !== ''): ?>
                             <tr>
-                                <td colspan="4" class="text-center text-muted py-4"><?php echo htmlspecialchars($message); ?></td>
+                                <td colspan="4" class="text-center text-muted py-4"><?php echo e($message); ?></td>
                             </tr>
                         <?php elseif (count($results) === 0): ?>
                             <tr>
@@ -287,22 +313,22 @@ if ($message === '') {
                         <?php else: ?>
                             <?php foreach ($results as $row): ?>
                                 <tr>
-                                    <td><?php echo date('M d, Y', strtotime($row['expense_date'])); ?></td>
-                                    <td><span class="badge-category"><?php echo htmlspecialchars($row['category']); ?></span></td>
-                                    <td><?php echo htmlspecialchars($row['description']); ?></td>
-                                    <td class="text-end amount-text">₱<?php echo number_format((float)$row['amount'], 2); ?></td>
+                                    <td><?php echo e(date('M d, Y', strtotime((string) $row['expense_date']))); ?></td>
+                                    <td><span class="badge-category"><?php echo e($row['category'] ?? 'Uncategorized'); ?></span></td>
+                                    <td><?php echo e($row['description'] ?? ''); ?></td>
+                                    <td class="text-end amount-text">₱<?php echo number_format((float) ($row['amount'] ?? 0), 2); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </tbody>
 
                     <?php if (count($results) > 0): ?>
-                    <tfoot>
-                        <tr class="grand-total-row">
-                            <td colspan="3" class="text-end">Grand Total Expenses:</td>
-                            <td class="text-end">₱<?php echo number_format($grand_total, 2); ?></td>
-                        </tr>
-                    </tfoot>
+                        <tfoot>
+                            <tr class="grand-total-row">
+                                <td colspan="3" class="text-end">Grand Total Expenses:</td>
+                                <td class="text-end">₱<?php echo number_format($grand_total, 2); ?></td>
+                            </tr>
+                        </tfoot>
                     <?php endif; ?>
                 </table>
             </div>
@@ -325,6 +351,21 @@ if ($message === '') {
     const collapseToggle = document.getElementById('collapseToggle');
     const mainSidebar = document.getElementById('mainSidebar');
 
+    function safeGetStorage(key, fallback = null) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return value !== null ? value : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function safeSetStorage(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+
     if (sidebarToggle) {
         sidebarToggle.addEventListener('click', () => {
             sidebar.classList.add('active');
@@ -339,7 +380,7 @@ if ($message === '') {
         });
     }
 
-    const savedCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
+    const savedCollapse = safeGetStorage('sidebarCollapsed', 'false') === 'true';
     if (savedCollapse && mainSidebar) {
         mainSidebar.classList.add('collapsed');
     }
@@ -347,11 +388,11 @@ if ($message === '') {
     if (collapseToggle) {
         collapseToggle.addEventListener('click', () => {
             mainSidebar.classList.toggle('collapsed');
-            localStorage.setItem('sidebarCollapsed', mainSidebar.classList.contains('collapsed'));
+            safeSetStorage('sidebarCollapsed', String(mainSidebar.classList.contains('collapsed')));
         });
     }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedTheme = safeGetStorage('theme', 'light');
     document.documentElement.setAttribute('data-theme', savedTheme);
 </script>
 </body>

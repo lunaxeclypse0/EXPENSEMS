@@ -1,136 +1,167 @@
-document.addEventListener('DOMContentLoaded', function () {
-    const loginForm      = document.getElementById('loginForm');
-    const usernameInput  = document.getElementById('username');
-    const passwordInput  = document.getElementById('password');
-    const usernameError  = document.getElementById('usernameError');
-    const passwordError  = document.getElementById('passwordError');
-    const togglePassword = document.getElementById('togglePassword');
-    const loginBtn       = document.getElementById('loginBtn');
-    const loginSpinner   = document.getElementById('loginSpinner');
-    const loginCard      = document.querySelector('.login-card');
-    const toastEl        = document.getElementById('loginToast');
-    const toastBody      = document.getElementById('toastBody');
-    const toast          = new bootstrap.Toast(toastEl, { delay: 3500 });
+document.addEventListener('DOMContentLoaded', () => {
+    const loginForm = document.getElementById('loginForm');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const usernameError = document.getElementById('usernameError');
+    const passwordError = document.getElementById('passwordError');
+    const togglePasswordIcon = document.getElementById('togglePassword');
+    const loginBtn = document.getElementById('loginBtn');
+    const loginSpinner = document.getElementById('loginSpinner');
+    const loginCard = document.querySelector('.login-card');
+    const rememberMe = document.getElementById('rememberMe');
+    const toastEl = document.getElementById('loginToast');
+    const toastBody = document.getElementById('toastBody');
 
-    togglePassword.addEventListener('click', function () {
-        const isPassword = passwordInput.type === 'password';
-        passwordInput.type = isPassword ? 'text' : 'password';
-        this.classList.toggle('fa-eye');
-        this.classList.toggle('fa-eye-slash');
-    });
+    const toast = toastEl ? new bootstrap.Toast(toastEl, { delay: 3500 }) : null;
 
     function clearErrors() {
-        usernameInput.classList.remove('is-invalid');
-        passwordInput.classList.remove('is-invalid');
-        usernameError.textContent = '';
-        passwordError.textContent = '';
+        usernameInput?.classList.remove('is-invalid');
+        passwordInput?.classList.remove('is-invalid');
+
+        if (usernameError) usernameError.textContent = '';
+        if (passwordError) passwordError.textContent = '';
     }
 
     function showToast(message, isSuccess = false) {
+        if (!toast || !toastEl || !toastBody) return;
+
         toastBody.textContent = message;
         toastEl.classList.toggle('success', isSuccess);
         toast.show();
     }
 
     function setLoading(isLoading) {
+        if (!loginBtn || !loginSpinner) return;
+
         loginBtn.disabled = isLoading;
-        loginBtn.querySelector('.btn-text').classList.toggle('d-none', isLoading);
+
+        const btnText = loginBtn.querySelector('.btn-text');
+        if (btnText) {
+            btnText.classList.toggle('d-none', isLoading);
+        }
+
         loginSpinner.classList.toggle('d-none', !isLoading);
     }
 
-    loginForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        clearErrors();
+    function shakeCard() {
+        if (!loginCard) return;
 
-        const username = usernameInput.value.trim();
-        const password  = passwordInput.value;
-        let hasError    = false;
+        loginCard.classList.add('shake');
+        setTimeout(() => loginCard.classList.remove('shake'), 500);
+    }
 
-        if (username === '') {
-            usernameInput.classList.add('is-invalid');
-            usernameError.textContent = 'Username is required.';
-            hasError = true;
+    async function parseResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+
+        if (contentType.includes('application/json')) {
+            return await response.json();
         }
 
-        if (password === '') {
-            passwordInput.classList.add('is-invalid');
-            passwordError.textContent = 'Password is required.';
-            hasError = true;
-        }
+        const text = await response.text();
+        return {
+            success: false,
+            message: text || 'Unexpected server response.'
+        };
+    }
 
-        if (hasError) {
-            loginCard.classList.add('shake');
-            setTimeout(() => loginCard.classList.remove('shake'), 500);
-            return;
-        }
-
-        setLoading(true);
-
-        const formData = new FormData();
-        formData.append('action', 'login');
-        formData.append('username', username);
-        formData.append('password', password);
-
-        fetch('../controllers/AuthController.php', {
+    async function postForm(url, formData) {
+        const response = await fetch(url, {
             method: 'POST',
             body: formData
-        })
-            .then((response) => response.json())
-            .then((data) => {
-                if (data.success) {
-                    showToast(data.message, true);
-                    setTimeout(() => {
-                        window.location.href = data.redirect;
-                    }, 800);
-                } else {
-                    setLoading(false);
-                    showToast(data.message, false);
-                    loginCard.classList.add('shake');
-                    setTimeout(() => loginCard.classList.remove('shake'), 500);
-                }
-            })
-            .catch(() => {
-                setLoading(false);
-                showToast('Server error. Please try again.', false);
-            });
-    });
-});
-
-/**
- * Google Sign-In Callback
- * Called automatically by Google's Identity Services library
- * once the user picks their Google account.
- */
-function handleGoogleCredentialResponse(response) {
-    const toastEl   = document.getElementById('loginToast');
-    const toastBody = document.getElementById('toastBody');
-    const toast     = new bootstrap.Toast(toastEl, { delay: 3500 });
-
-    const formData = new FormData();
-    formData.append('credential', response.credential);
-
-    fetch('../controllers/GoogleAuthController.php', {
-        method: 'POST',
-        body: formData
-    })
-        .then((res) => res.json())
-        .then((data) => {
-            if (data.success) {
-                toastBody.textContent = data.message;
-                toastEl.classList.add('success');
-                toast.show();
-                setTimeout(() => {
-                    window.location.href = data.redirect;
-                }, 800);
-            } else {
-                toastBody.textContent = data.message;
-                toastEl.classList.remove('success');
-                toast.show();
-            }
-        })
-        .catch(() => {
-            toastBody.textContent = 'Google sign-in failed. Please try again.';
-            toastEl.classList.remove('success');
-            toast.show();
         });
-}
+
+        const data = await parseResponse(response);
+
+        return { response, data };
+    }
+
+    if (togglePasswordIcon && passwordInput) {
+        togglePasswordIcon.addEventListener('click', () => {
+            const isPassword = passwordInput.type === 'password';
+
+            passwordInput.type = isPassword ? 'text' : 'password';
+            togglePasswordIcon.classList.toggle('fa-eye');
+            togglePasswordIcon.classList.toggle('fa-eye-slash');
+        });
+    }
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearErrors();
+
+            const username = usernameInput?.value.trim() || '';
+            const password = passwordInput?.value || '';
+            let hasError = false;
+
+            if (username === '') {
+                usernameInput?.classList.add('is-invalid');
+                if (usernameError) usernameError.textContent = 'Username is required.';
+                hasError = true;
+            }
+
+            if (password === '') {
+                passwordInput?.classList.add('is-invalid');
+                if (passwordError) passwordError.textContent = 'Password is required.';
+                hasError = true;
+            }
+
+            if (hasError) {
+                shakeCard();
+                return;
+            }
+
+            setLoading(true);
+
+            const formData = new FormData();
+            formData.append('action', 'login');
+            formData.append('username', username);
+            formData.append('password', password);
+            formData.append('remember_me', rememberMe?.checked ? '1' : '');
+            formData.append('csrf_token', window.CSRF_TOKEN || '');
+
+            try {
+                const { response, data } = await postForm('../controllers/AuthController.php', formData);
+
+                if (response.ok && data.success) {
+                    showToast(data.message || 'Login successful.', true);
+
+                    setTimeout(() => {
+                        window.location.href = data.redirect || '../views/dashboard.php';
+                    }, 800);
+                    return;
+                }
+
+                setLoading(false);
+                showToast(data.message || 'Login failed. Please try again.');
+                shakeCard();
+            } catch (error) {
+                setLoading(false);
+                showToast('Server error. Please try again.');
+            }
+        });
+    }
+
+    window.handleGoogleCredentialResponse = async function (googleResponse) {
+        try {
+            const formData = new FormData();
+            formData.append('credential', googleResponse.credential);
+            formData.append('csrf_token', window.CSRF_TOKEN || '');
+
+            const { response, data } = await postForm('../controllers/GoogleAuthController.php', formData);
+
+            if (response.ok && data.success) {
+                showToast(data.message || 'Google sign-in successful.', true);
+
+                setTimeout(() => {
+                    window.location.href = data.redirect || '../views/dashboard.php';
+                }, 800);
+                return;
+            }
+
+            showToast(data.message || 'Google sign-in failed.');
+        } catch (error) {
+            showToast('Google sign-in failed. Please try again.');
+        }
+    };
+});

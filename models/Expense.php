@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 require_once __DIR__ . '/../config/database.php';
 
 class Expense
@@ -12,38 +14,71 @@ class Expense
         $this->conn = $db->connect();
     }
 
-    public function getTotalToday(): float
+    /** @return array{today: float, month: float, overall: float} */
+    public function getDashboardTotals(?int $userId = null): array
     {
-        $sql = "SELECT COALESCE(SUM(amount), 0) AS total FROM {$this->table} WHERE expense_date = CURDATE()";
+        $scope = $userId === null ? '' : ' WHERE user_id = :user_id';
+
+        $sql = "SELECT
+                    COALESCE(SUM(CASE WHEN expense_date = CURDATE() THEN amount ELSE 0 END), 0) AS today,
+                    COALESCE(SUM(CASE
+                        WHEN expense_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                         AND expense_date < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 1 MONTH)
+                        THEN amount ELSE 0 END), 0) AS month,
+                    COALESCE(SUM(amount), 0) AS overall
+                FROM {$this->table}{$scope}";
+
         $stmt = $this->conn->prepare($sql);
+
+        if ($userId !== null) {
+            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        }
+
         $stmt->execute();
-        return (float) $stmt->fetch()['total'];
+        $totals = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'today' => (float) ($totals['today'] ?? 0),
+            'month' => (float) ($totals['month'] ?? 0),
+            'overall' => (float) ($totals['overall'] ?? 0),
+        ];
     }
 
-    public function getTotalThisMonth(): float
+    public function getTotalToday(?int $userId = null): float
     {
-        $sql = "SELECT COALESCE(SUM(amount), 0) AS total FROM {$this->table} 
-                WHERE MONTH(expense_date) = MONTH(CURDATE()) AND YEAR(expense_date) = YEAR(CURDATE())";
-        $stmt = $this->conn->prepare($sql);
-        $stmt->execute();
-        return (float) $stmt->fetch()['total'];
+        return $this->getDashboardTotals($userId)['today'];
     }
 
-    public function getTotalOverall(): float
+    public function getTotalThisMonth(?int $userId = null): float
     {
-        $sql = "SELECT COALESCE(SUM(amount), 0) AS total FROM {$this->table}";
-        $stmt = $this->conn->prepare($sql);
-        $stmt->execute();
-        return (float) $stmt->fetch()['total'];
+        return $this->getDashboardTotals($userId)['month'];
     }
 
-    public function getRecent(int $limit = 5): array
+    public function getTotalOverall(?int $userId = null): float
     {
-        $sql = "SELECT id, title, amount, expense_date FROM {$this->table} 
-                ORDER BY expense_date DESC, id DESC LIMIT :limit";
+        return $this->getDashboardTotals($userId)['overall'];
+    }
+
+    public function getRecent(?int $userId = null, int $limit = 5): array
+    {
+        $limit = max(1, min($limit, 20));
+        $scope = $userId === null ? '' : 'WHERE user_id = :user_id';
+
+        $sql = "SELECT id, title, amount, expense_date
+                FROM {$this->table}
+                {$scope}
+                ORDER BY expense_date DESC, id DESC
+                LIMIT :limit";
+
         $stmt = $this->conn->prepare($sql);
+
+        if ($userId !== null) {
+            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        }
+
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
-        return $stmt->fetchAll();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }

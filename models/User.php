@@ -1,8 +1,5 @@
 <?php
-/**
- * User Model
- * Handles all database operations related to the users table
- */
+declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 
@@ -17,146 +14,171 @@ class User
         $this->conn = $db->connect();
     }
 
-    /**
-     * Find a user by username
-     */
     public function findByUsername(string $username): array|false
     {
-        $sql = "SELECT id, fullname, username, email, password, role 
-                FROM {$this->table} 
-                WHERE username = :username 
+        $sql = "SELECT id, fullname, username, email, password, role
+                FROM {$this->table}
+                WHERE username = :username
                 LIMIT 1";
 
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':username', $username, PDO::PARAM_STR);
+        $stmt->bindValue(':username', $username, PDO::PARAM_STR);
         $stmt->execute();
 
-        return $stmt->fetch();
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Find a user by email
-     */
     public function findByEmail(string $email): array|false
     {
-        $sql = "SELECT id, fullname, username, email, password, role 
-                FROM {$this->table} 
-                WHERE email = :email 
+        $sql = "SELECT id, fullname, username, email, password, role
+                FROM {$this->table}
+                WHERE email = :email
                 LIMIT 1";
 
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':email', $email, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $email, PDO::PARAM_STR);
         $stmt->execute();
 
-        return $stmt->fetch();
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Find a user by username OR email (used for login)
-     */
     public function findByUsernameOrEmail(string $identifier): array|false
     {
-        $sql = "SELECT id, fullname, username, email, password, role 
-                FROM {$this->table} 
-                WHERE username = :identifier1 OR email = :identifier2 
+        $sql = "SELECT id, fullname, username, email, password, role
+                FROM {$this->table}
+                WHERE username = :identifier1 OR email = :identifier2
                 LIMIT 1";
 
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':identifier1', $identifier, PDO::PARAM_STR);
-        $stmt->bindParam(':identifier2', $identifier, PDO::PARAM_STR);
+        $stmt->bindValue(':identifier1', $identifier, PDO::PARAM_STR);
+        $stmt->bindValue(':identifier2', $identifier, PDO::PARAM_STR);
         $stmt->execute();
 
-        return $stmt->fetch();
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Check if a username already exists
-     */
     public function usernameExists(string $username): bool
     {
         $sql = "SELECT id FROM {$this->table} WHERE username = :username LIMIT 1";
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':username', $username, PDO::PARAM_STR);
+        $stmt->bindValue(':username', $username, PDO::PARAM_STR);
         $stmt->execute();
 
-        return $stmt->fetch() !== false;
+        return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
     }
 
-    /**
-     * Check if an email already exists
-     */
     public function emailExists(string $email): bool
     {
         $sql = "SELECT id FROM {$this->table} WHERE email = :email LIMIT 1";
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':email', $email, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $email, PDO::PARAM_STR);
         $stmt->execute();
 
-        return $stmt->fetch() !== false;
+        return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
     }
 
-    /**
-     * Create a new user (Register)
-     */
-    public function createUser(string $fullname, string $username, string $email, string $hashedPassword, string $role = 'staff'): bool
-    {
-        $sql = "INSERT INTO {$this->table} (fullname, username, email, password, role) 
+    public function createUser(
+        string $fullname,
+        string $username,
+        string $email,
+        string $hashedPassword,
+        string $role = 'user'
+    ): bool {
+        $sql = "INSERT INTO {$this->table} (fullname, username, email, password, role)
                 VALUES (:fullname, :username, :email, :password, :role)";
 
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':fullname', $fullname, PDO::PARAM_STR);
-        $stmt->bindParam(':username', $username, PDO::PARAM_STR);
-        $stmt->bindParam(':email', $email, PDO::PARAM_STR);
-        $stmt->bindParam(':password', $hashedPassword, PDO::PARAM_STR);
-        $stmt->bindParam(':role', $role, PDO::PARAM_STR);
+        $stmt->bindValue(':fullname', $fullname, PDO::PARAM_STR);
+        $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $email, PDO::PARAM_STR);
+        $stmt->bindValue(':password', $hashedPassword, PDO::PARAM_STR);
+        $stmt->bindValue(':role', $role, PDO::PARAM_STR);
 
         return $stmt->execute();
     }
 
-    /**
-     * Find a user by Google ID
-     */
+    public function findById(int $userId): array|false
+    {
+        $stmt = $this->conn->prepare("
+            SELECT id, fullname, username, email, password, google_id, profile_picture, role, created_at
+            FROM {$this->table}
+            WHERE id = :id
+            LIMIT 1
+        ");
+        $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    public function updatePasswordHash(int $userId, string $passwordHash): bool
+    {
+        $stmt = $this->conn->prepare("UPDATE {$this->table} SET password = :password WHERE id = :id");
+        $stmt->bindValue(':password', $passwordHash, PDO::PARAM_STR);
+        $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+
+        return $stmt->execute();
+    }
+
+    public function usernameOrEmailExistsForAnotherUser(string $username, string $email, int $userId): bool
+    {
+        $stmt = $this->conn->prepare("
+            SELECT id
+            FROM {$this->table}
+            WHERE (username = :username OR email = :email) AND id != :id
+            LIMIT 1
+        ");
+        $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $email, PDO::PARAM_STR);
+        $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
+    }
+
     public function findByGoogleId(string $googleId): array|false
     {
-        $sql = "SELECT id, fullname, username, email, google_id, role 
-                FROM {$this->table} 
-                WHERE google_id = :google_id 
+        $sql = "SELECT id, fullname, username, email, google_id, role
+                FROM {$this->table}
+                WHERE google_id = :google_id
                 LIMIT 1";
 
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':google_id', $googleId, PDO::PARAM_STR);
+        $stmt->bindValue(':google_id', $googleId, PDO::PARAM_STR);
         $stmt->execute();
 
-        return $stmt->fetch();
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Link a Google ID to an existing account (matched by email)
-     */
     public function linkGoogleId(int $userId, string $googleId): bool
     {
         $sql = "UPDATE {$this->table} SET google_id = :google_id WHERE id = :id";
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':google_id', $googleId, PDO::PARAM_STR);
-        $stmt->bindParam(':id', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':google_id', $googleId, PDO::PARAM_STR);
+        $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
 
         return $stmt->execute();
     }
 
-    /**
-     * Create a new user via Google Sign-In (no password needed)
-     */
-    public function createGoogleUser(string $fullname, string $username, string $email, string $googleId, string $role = 'staff'): bool
-    {
-        $sql = "INSERT INTO {$this->table} (fullname, username, email, google_id, role) 
-                VALUES (:fullname, :username, :email, :google_id, :role)";
+    public function createGoogleUser(
+        string $fullname,
+        string $username,
+        string $email,
+        string $googleId,
+        string $role = 'user'
+    ): bool {
+        $sql = "INSERT INTO {$this->table} (fullname, username, email, password, google_id, role)
+                VALUES (:fullname, :username, :email, :password, :google_id, :role)";
 
         $stmt = $this->conn->prepare($sql);
-        $stmt->bindParam(':fullname', $fullname, PDO::PARAM_STR);
-        $stmt->bindParam(':username', $username, PDO::PARAM_STR);
-        $stmt->bindParam(':email', $email, PDO::PARAM_STR);
-        $stmt->bindParam(':google_id', $googleId, PDO::PARAM_STR);
-        $stmt->bindParam(':role', $role, PDO::PARAM_STR);
+        $password = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
+
+        $stmt->bindValue(':fullname', $fullname, PDO::PARAM_STR);
+        $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $email, PDO::PARAM_STR);
+        $stmt->bindValue(':password', $password, PDO::PARAM_STR);
+        $stmt->bindValue(':google_id', $googleId, PDO::PARAM_STR);
+        $stmt->bindValue(':role', $role, PDO::PARAM_STR);
 
         return $stmt->execute();
     }
